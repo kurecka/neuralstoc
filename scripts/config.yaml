@@ -1,0 +1,59 @@
+# NeuralStoc Configuration File
+# This file contains all the options that can be passed to rsm_loop.py
+
+# Experiment Settings
+timeout: 1440  # Timeout in minutes (default: 24 hours)
+prob: 0.95  # Probability threshold
+eps: 0.001  # Epsilon value for convergence
+plot: true  # Whether to plot results
+min_iters: 0  # Minimum number of iterations
+
+# Controller Initialization
+initialize: "sac"  # Initialization method: "ppo" or "sac"
+skip_initialize: false  # Skip initialization step
+continue_ppo: false  # Continue PPO training
+only_initialize: false  # Only perform initialization step
+load_from_brax: true  # Load from brax
+policy_path: null  # Path to policy file
+continue_rsm: 0  # Continue RSM from saved checkpoint
+
+# Network Architecture
+hidden_v: 256  # Hidden layer size for V network
+hidden_p: 256  # Hidden layer size for policy network
+num_layers_v: 2  # Number of layers in V network
+num_layers_p: 2  # Number of layers in policy network
+v_act: "relu"  # Activation function for V network
+
+# Training Parameters
+p_lr: 0.000001  # Learning rate for policy network
+c_lr: 0.0005  # Learning rate for critic
+v_lr: 0.0001  # Learning rate for V network
+lip_lambda: 0.2  # Lipschitz regularization coefficient
+p_lip: 4.0  # Lipschitz constant for policy network
+v_lip: 15.0  # Lipschitz constant for V network
+train_p: 0  # Number of policy training steps per iteration
+soft_constraint: false  # Use soft constraints
+normalize_r: 0  # Normalize rewards
+normalize_a: 1  # Normalize actions
+rollback_threshold: 0.95  # Threshold for policy rollback
+
+# Batch and Grid Sizes
+batch_size: "32k"  # Batch size for verification
+learner_batch_size: "32k"  # Batch size for learning
+grid_size: "32M"  # Grid size for verification
+buffer_size: 6000000  # Buffer size
+n_local: 10  # Number of local samples
+
+# PPO Settings
+ppo_iters: 100  # Number of PPO iterations
+n_step: 1  # Number of steps per PPO update
+std_start: 1.0  # Starting standard deviation for PPO
+std_end: 0.05  # Ending standard deviation for PPO
+
+# Advanced Options
+norm: "linf"  # Norm type: "l1" or "linf"
+ds_type: "all"  # Dataset type
+improved_loss: true  # Use improved loss function
+policy_rollback: true  # Use policy rollback
+estimate_expected_via_ibp: true  # Estimate expected value via IBP
+init_with_static: false  # Initialize with static policy 

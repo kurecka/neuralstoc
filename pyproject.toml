@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuralstoc"
+version = "0.1.0"
+authors = [
+    { name = "Ansaripour, Matin", email = "matin.ansaripour@epfl.ch" },
+    { name = "Chatterjee, Krishnendu", email = "krishnendu.chatterjee@ist.ac.at" },
+    { name = "Henzinger, Thomas A.", email = "tah@ist.ac.at" },
+    { name = "Lechner, Mathias", email = "mlechner@mit.edu" },
+    { name = "Verma, Abhinav", email = "verma@psu.edu" },
+    { name = "Žikelić, Đorđe", email = "dzikelic@smu.edu.sg" },
+]
+description = "NeuralStoc is a tool for Neural Stochastic Control and Verification"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "flax",
+    "gym",
+    "jax[cuda12]",
+    "optax",
+    "tqdm",
+    "tensorflow",
+    "seaborn",
+    "torch",
+    "numpy",
+    "sortedcontainers",
+    "matplotlib",
+    "scipy==1.12",
+    "torchsummary",
+    "IPython",
+    "brax @ git+https://github.com/google/brax.git@69637a359463738140c1b850f61ad0088a23538b",
+    "auto_LiRPA @ git+https://github.com/Verified-Intelligence/auto_LiRPA@bfb7997115c5e66327de81b43c42b23c8a0ffb1e",
+]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+
+
+[project.urls]
+"Homepage" = "https://github.com/matinansaripour/neuralstoc.git"
