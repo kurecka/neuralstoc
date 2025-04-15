@@ -329,7 +329,6 @@ def compute_local_lipschitz(tnet, x0, eps, out_dim=1, obs_normalization=None):
     Computes the local Lipschitz constant around a given point x0.
     """
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    # print('device: ', device, 'shape: ', x0.shape, 'eps: ', eps, 'out_dim: ', out_dim)
     mean_ = None
     std_ = None
     if obs_normalization is not None:

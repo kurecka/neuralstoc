@@ -539,7 +539,7 @@ class RSMLoop:
                     )
                 elif self.verifier.spec == "stability":
                     print(
-                        f"Stability bound is at least {actual_prob * 100:0.3f}%"
+                        f"Stability bound is {actual_prob * 100:0.3f}%"
                     )
                 elif self.verifier.spec == "safety":
                     print(

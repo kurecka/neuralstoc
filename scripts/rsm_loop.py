@@ -93,8 +93,8 @@ def load_config(config_path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     
-    parser.add_argument("--load_config", action="store_true")
-    parser.add_argument("--config_path", type=str)
+    parser.add_argument("--no_config", action="store_true")
+    parser.add_argument("--config_path", type=str, default="scripts/config.yaml")
     parser.add_argument("--model", default="tmlp")
     parser.add_argument("--env", default="vlds")
     parser.add_argument("--task", default="control")
@@ -122,7 +122,7 @@ if __name__ == "__main__":
     parser.add_argument("--continue_rsm", type=int, default=0)
     parser.add_argument("--rsm_path", type=str, default=None)
     parser.add_argument("--no_train", action="store_true")
-    parser.add_argument("--train_p", type=int, default=10)
+    parser.add_argument("--train_p", type=int, default=3)
     parser.add_argument("--soft_constraint", action="store_true")
     parser.add_argument("--normalize_r", type=int, default=0)
     parser.add_argument("--normalize_a", type=int, default=1)
@@ -144,11 +144,12 @@ if __name__ == "__main__":
     parser.add_argument("--estimate_expected_via_ibp", action="store_true")
     parser.add_argument("--init_with_static", action="store_true")
     parser.add_argument("--policy_path", default=None)
-    parser.add_argument("--rollback_threshold", default=0.3, type=float)
+    parser.add_argument("--rollback_threshold", default=0.99, type=float)
+    parser.add_argument("--smoke_test", action="store_true")
 
     args = parser.parse_args()
     
-    if args.load_config:
+    if not args.no_config:
         if args.config_path is None:
             print("Error: --config_path must be specified when using --load_config")
             sys.exit(1)
@@ -236,12 +237,13 @@ if __name__ == "__main__":
         init_with_static=args.init_with_static,
         spec=args.spec,
         task=args.task,
+        policy_type=args.initialize,
     )
     if args.load_from_brax or args.initialize == "sac":
         policy_path = args.policy_path if args.policy_path is not None else f"checkpoints/{args.env}_{args.initialize}"
     else:
         policy_path = args.policy_path if args.policy_path is not None else f"checkpoints/{args.env}_{args.initialize}.jax"
-    if args.skip_initialize:
+    if args.skip_initialize and args.continue_rsm <= 0:
         if args.load_from_brax:
             params = brax_model.load_params(policy_path)
             learner.load_from_brax(params)
@@ -282,7 +284,7 @@ if __name__ == "__main__":
         no_train=args.no_train,
         skip_first=args.continue_rsm > 0,
     )
-    txt_return, _ = learner.evaluate_rl()
+    txt_return, res_dict = learner.evaluate_rl()
 
     loop.plot_l(f"{loop.exp_name}/plots/{args.env}_start_{args.exp_name}.png")
     with open("initialize_results.txt", "a") as f:
@@ -292,6 +294,14 @@ if __name__ == "__main__":
         import sys
 
         sys.exit(0)
+
+    if args.smoke_test:
+        import sys
+        if res_dict['num_end_in_target'] <= 0:
+            sys.exit(0)
+        else:
+            sys.exit(1)
+
 
     sat = loop.run(args.timeout * 60)
     loop.plot_l(f"{loop.exp_name}/plots/{args.env}_end_{args.exp_name}.png")

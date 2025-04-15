@@ -5,12 +5,6 @@ from brax.io import model
 from neuralstoc.rl import train_sac
 
 
-max_y = 8000
-min_y = -150
-
-xdata, ydata = [], []
-num_timesteps = 2_500_000_000
-
 class SAC:
     """
     Soft Actor-Critic (SAC) implementation for NeuralStoc.
@@ -36,16 +30,18 @@ class SAC:
         """
         self.env_name = env_name
         self.p_hidden = p_hidden
+        num_timesteps = 2_500_000_000
+
         if env_dim is None:
             self.env = envs.get_environment(env_name=env_name)
         else:
             self.env = envs.get_environment(env_name=env_name, num_dims=env_dim)
-        w_decay = 20.0
+        self.w_decay = 20.0
         self.train_fn = functools.partial(train_sac.train, num_timesteps=num_timesteps, num_evals=100, reward_scaling=0.1,
                                           episode_length=self.env.episode_length, normalize_observations=True, action_repeat=1,
                                           discounting=0.99, learning_rate=1e-6, num_envs=2048,
                                           batch_size=1024, seed=1, grad_updates_per_step=1, max_devices_per_host=1,
-                                          max_replay_size=1048576, min_replay_size=8192, weight_decay=w_decay)
+                                          max_replay_size=1048576, min_replay_size=8192, weight_decay=self.w_decay)
 
 
     @staticmethod
@@ -69,5 +65,19 @@ class SAC:
         make_inference_fn, params, _ = self.train_fn(environment=self.env, progress_fn=self.progress, p_hidden=self.p_hidden)
         model.save_params(filename, params)
         return params
+    
+    @staticmethod
+    def dummy_progress(num_steps, metrics):
+        pass
+    
+    def dummy_obs_norm(self):
+        print("Computing dummy obs norm")
+        strain_fn = functools.partial(train_sac.train, num_timesteps=8193, num_evals=100, reward_scaling=0.1,
+                                          episode_length=self.env.episode_length, normalize_observations=True, action_repeat=1,
+                                          discounting=0.99, learning_rate=1e-6, num_envs=2048,
+                                          batch_size=1024, seed=1, grad_updates_per_step=1, max_devices_per_host=1,
+                                          max_replay_size=1048576, min_replay_size=8192, weight_decay=self.w_decay)
+        _, params, _ = strain_fn(environment=self.env, progress_fn=self.dummy_progress, p_hidden=self.p_hidden)
+        return params[0]
 
 

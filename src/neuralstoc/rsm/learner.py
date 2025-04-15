@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from copy import deepcopy
 
 import jax
@@ -992,11 +993,14 @@ class RSMLearner:
 
         self.p_init_params = deepcopy(self.p_state.params['params'])
         if self.policy_type == "sac":
+            self.obs_normalization = self.sac.dummy_obs_norm()
+            # self.obs_normalization = {'mean': 0, 'std': 0, 'count': 0, 'summed_variance': 0}
             try:
                 if filename.endswith(".jax"):
                     self.obs_normalization = jax_load(self.obs_normalization, filename.replace(".jax", "_obs_normalization.jax"))
                 else:
                     self.obs_normalization = jax_load(self.obs_normalization, filename + "_obs_normalization.jax")
+                # self.obs_normalization = SimpleNamespace(**self.obs_normalization)
             except Exception as e:
                 print(e)
 
