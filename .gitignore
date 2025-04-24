@@ -1,3 +1,9 @@
+# Experiment output
+checkpoints
+global_summary.txt
+initialize_results.txt
+study_results
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
