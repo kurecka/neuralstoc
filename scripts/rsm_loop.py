@@ -37,6 +37,12 @@ from neuralstoc.rsm.loop import RSMLoop
 from neuralstoc.rsm.learner import RSMLearner
 from neuralstoc.rsm.verifier import RSMVerifier
 
+
+import logging
+logger = logging.getLogger("neuralstoc")
+logger.setLevel(logging.DEBUG)
+
+
 def interpret_size_arg(cmd):
     """
     Converts a string with multiplications into an integer with optional unit multipliers.
@@ -146,9 +152,16 @@ if __name__ == "__main__":
     parser.add_argument("--policy_path", default=None)
     parser.add_argument("--rollback_threshold", default=0.99, type=float)
     parser.add_argument("--smoke_test", action="store_true")
+    parser.add_argument("--logger_level", default="ERROR")
 
     args = parser.parse_args()
-    
+
+    print(args.logger_level)
+    try:
+        logger.setLevel(args.logger_level)
+    except AttributeError:
+        raise ValueError(f"Invalid logger level: {args.logger_level}. Allowed values are: DEBUG, INFO, WARNING, ERROR, CRITICAL.")
+
     if not args.no_config:
         if args.config_path is None:
             print("Error: --config_path must be specified when using --load_config")
@@ -204,6 +217,8 @@ if __name__ == "__main__":
 
     assert args.norm.lower() in ["l1", "linf"], "L1 and Linf norms are allowed"
     os.makedirs("checkpoints", exist_ok=True)
+
+    logger.info("Initializing learner")
     learner = RSMLearner(
         [args.hidden_v for i in range(args.num_layers_v)],
         [args.hidden_p for i in range(args.num_layers_p)],
@@ -244,6 +259,7 @@ if __name__ == "__main__":
     else:
         policy_path = args.policy_path if args.policy_path is not None else f"checkpoints/{args.env}_{args.initialize}.jax"
     if args.skip_initialize and args.continue_rsm <= 0:
+        logger.info("Loading policy")
         if args.load_from_brax:
             params = brax_model.load_params(policy_path)
             learner.load_from_brax(params)
@@ -251,8 +267,10 @@ if __name__ == "__main__":
             learner.load(policy_path, force_load_all=False)
 
     if not args.skip_initialize:
+        logger.info("Pretraining policy")
         learner.pretrain_policy(args.initialize, filename=policy_path)
 
+    logger.info("Initializing verifier")
     verifier = RSMVerifier(
         learner,
         env,
@@ -267,9 +285,11 @@ if __name__ == "__main__":
     )
 
     if args.continue_rsm > 0:
+        logger.info(f"Continue RSM. path = {args.rsm_path}")
         learner.load(args.rsm_path)
         verifier.grid_size *= args.continue_rsm
 
+    logger.info("Initializing the loop")
     loop = RSMLoop(
         learner,
         verifier,
@@ -284,8 +304,10 @@ if __name__ == "__main__":
         no_train=args.no_train,
         skip_first=args.continue_rsm > 0,
     )
+    logger.info("Evaluating the policy")
     txt_return, res_dict = learner.evaluate_rl()
 
+    logger.info("Plotting")
     loop.plot_l(f"{loop.exp_name}/plots/{args.env}_start_{args.exp_name}.png")
     with open("initialize_results.txt", "a") as f:
         f.write(f"{args.env}: {txt_return}\n")
@@ -302,10 +324,13 @@ if __name__ == "__main__":
         else:
             sys.exit(1)
 
-
+    logger.info("Running the loop")
     sat = loop.run(args.timeout * 60)
+
+    logger.info("Plotting")
     loop.plot_l(f"{loop.exp_name}/plots/{args.env}_end_{args.exp_name}.png")
 
+    logger.info("Writing results")
     os.makedirs("study_results", exist_ok=True)
     env_name = args.env.split("_")
     if len(env_name) > 2:

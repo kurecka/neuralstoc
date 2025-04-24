@@ -23,6 +23,10 @@ import seaborn as sns
 import jax.numpy as jnp
 
 
+import logging
+logger = logging.getLogger("neuralstoc")
+
+
 class RSMLoop:
     """
     RSMLoop implements the learner-verifier framework for neural stochastic control with certificates.
@@ -117,6 +121,7 @@ class RSMLoop:
         num_epochs = (
             50 if self.iter > 0 else 200
         )  # in the first iteration we train a bit longer
+        logger.info(f"Learning for {num_epochs} epochs. {train_ds}")
         if self.iter > 2:
             self.learner.init_with_static = False
 
@@ -229,6 +234,7 @@ class RSMLoop:
                 - satisfied (bool): True if the decrease condition is satisfied
                 - max_decrease (float): The maximum allowed decrease value
         """
+        logger.info("Checking decrease condition...")
         (
             violations,
             hard_violations,
@@ -518,6 +524,7 @@ class RSMLoop:
                 p_state_copy = copy.deepcopy(self.learner.p_state)
                 self.learn()
                 if self.plot:
+                    logger.info("Plotting")
                     self.plot_l(f"{self.exp_name}/loop/{self.env.name}_{self.iter:04d}_{self.exp_name}_pre.png", is_pre=True)
                 _, res = self.learner.evaluate_rl()
                 if res['num_end_in_target'] / res['num_traj'] < self.rollback_threshold and self.policy_rollback:
@@ -530,6 +537,7 @@ class RSMLoop:
             sys.stdout.flush()
 
             if self.plot:
+                logger.info("Plotting")
                 self.plot_l(f"{self.exp_name}/loop/{self.env.name}_{self.iter:04d}_{self.exp_name}.png")
 
             if actual_prob is not None:

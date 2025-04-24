@@ -21,6 +21,10 @@ import jax.numpy as jnp
 from tqdm import tqdm
 import numpy as np
 
+import logging
+logger = logging.getLogger("neuralstoc")
+
+
 # Tensorflow should not allocate any GPU memory
 tf.config.experimental.set_visible_devices([], "GPU")
 
@@ -40,6 +44,7 @@ def get_n_for_bound_computation(obs_dim):
 class TrainBuffer:
     def __init__(self, max_size=2_000_000):
         """Counterexample training buffer"""
+        logger.info(f"Initializing training buffer with max size {max_size}")
         self.s = []
         self.max_size = max_size
         self._cached_ds = None
