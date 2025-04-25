@@ -25,6 +25,9 @@ import numpy as np
 from neuralstoc.rl.sac import SAC
 from neuralstoc.rl.ppo import vPPO
 
+import logging
+logger = logging.getLogger("neuralstoc")
+
 
 class RSMLearner:
     """
@@ -278,7 +281,7 @@ class RSMLearner:
             self.p_state = self.ppo.p_state
             self.c_state = self.ppo.c_state
             self.save(filename)
-            print("[SAVED]")
+            logger.info("[SAVED]")
         elif initialize == "sac":
             params = self.sac.train(filename)
             self.load_from_brax(params)
@@ -323,8 +326,10 @@ class RSMLearner:
         num_end_in_target = jnp.sum(contains.astype(jnp.int64))
         num_traj = contains.shape[0]
 
-        text = f"Rollouts (n={n}): {np.mean(total_reward):0.1f} +- {np.std(total_reward):0.1f} [{np.min(total_reward):0.1f}, {np.max(total_reward):0.1f}] ({100 * num_end_in_target / num_traj:0.2f}% end in target)"
-        print(text)
+        text = f"Rollouts (n={n}): {np.mean(total_reward):0.1f} +- {np.std(total_reward):0.1f}" \
+            f"[{np.min(total_reward):0.1f}, {np.max(total_reward):0.1f}] ({100 * num_end_in_target / num_traj:0.2f}% end in target)"
+        logger.info(text)
+
         res_dict = {
             "mean_r": np.mean(total_reward),
             "std_r": np.std(total_reward),
@@ -935,7 +940,7 @@ class RSMLearner:
             else:
                 jax_save(self.obs_normalization, filename=filename + "_obs_normalization.jax")
         except Exception as e:
-            print(e)
+            logger.error(e)
 
     def load(self, filename, force_load_all=True):
         """
@@ -1002,7 +1007,7 @@ class RSMLearner:
                     self.obs_normalization = jax_load(self.obs_normalization, filename + "_obs_normalization.jax")
                 # self.obs_normalization = SimpleNamespace(**self.obs_normalization)
             except Exception as e:
-                print(e)
+                logger.error(e)
 
     def load_from_brax(self, params):
         """

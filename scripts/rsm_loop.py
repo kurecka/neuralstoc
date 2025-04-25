@@ -156,7 +156,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    print(args.logger_level)
     try:
         logger.setLevel(args.logger_level)
     except AttributeError:
@@ -164,7 +163,7 @@ if __name__ == "__main__":
 
     if not args.no_config:
         if args.config_path is None:
-            print("Error: --config_path must be specified when using --load_config")
+            logger.error("Error: --config_path must be specified when using --load_config")
             sys.exit(1)
         
         config = load_config(args.config_path)

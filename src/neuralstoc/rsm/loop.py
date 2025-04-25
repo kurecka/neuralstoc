@@ -147,7 +147,7 @@ class RSMLoop:
 
         training_time = pretty_time(time.time() - start_time)
 
-        print(
+        logger.info(
             f"Trained on {pretty_number(len(self.verifier.train_buffer))} samples, start_loss={start_metrics['loss']:0.3g}, end_loss={metrics['loss']:0.3g}, start_violations={start_metrics['train_violations']:0.3g}, end_violations={metrics['train_violations']:0.3g} in {training_time}"
         )
 
@@ -180,11 +180,11 @@ class RSMLoop:
                 K_l = compute_local_lipschitz(self.learner.v_tnet, grid, eps)
                 self.verifier.cached_lip_l_linf = jnp.float32(K_l)
                 self.verifier.cached_lip_p_linf = jnp.float32(K_p)
-                print('local K_l:', K_l)
-                print('local K_p:', K_p)
+                logger.debug('local K_l:', K_l)
+                logger.debug('local K_p:', K_p)
                 K_f = self.env.lipschitz_constant_linf
                 lipschitz_k = K_l * K_f * np.maximum(1, K_p) + K_l
-                print('lip_k: ', lipschitz_k)
+                logger.debug('lip_k: ', lipschitz_k)
 
                 self.log(eps=eps)
                 global_K_l = lipschitz_linf_jax(self.learner.v_state.params).item()
@@ -254,17 +254,17 @@ class RSMLoop:
             if self.env.observation_space.shape[0] == 2:
                 self.verifier.grid_size *= 1.1
                 self.verifier.grid_size = int(self.verifier.grid_size)
-                print(f"Increasing grid resolution -> {self.verifier.grid_size}")
+                logger.info(f"Increasing grid resolution -> {self.verifier.grid_size}")
             elif self.env.observation_space.shape[0] == 3:
                 if self.no_train:
                     self.verifier.grid_size *= 1.05
                     self.verifier.grid_size = int(self.verifier.grid_size)
-                    print(f"Increasing grid resolution -> {self.verifier.grid_size}")
+                    logger.info(f"Increasing grid resolution -> {self.verifier.grid_size}")
             else:
                 if self.no_train:
                     self.verifier.grid_size *= 1.01
                     self.verifier.grid_size = int(self.verifier.grid_size)
-                    print(f"Increasing grid resolution -> {self.verifier.grid_size}")
+                    logger.info(f"Increasing grid resolution -> {self.verifier.grid_size}")
 
         return False, max_decrease
 
@@ -289,9 +289,9 @@ class RSMLoop:
         dec_sat, max_decrease = self.check_decrease_condition(lipschitz_k)
 
         self.learner.save(f"{self.exp_name}/saved/{self.env.name}_loop_{self.iter}.jax")
-        print("[SAVED]")
+        logger.info("[SAVED]")
         if dec_sat:
-            print("Decrease condition fulfilled!")
+            logger.info("Decrease condition fulfilled!")
 
             n = get_n_for_bound_computation(self.env.observation_dim)
 
@@ -307,7 +307,7 @@ class RSMLoop:
                 self.log(lb_domain=lb_domain)
                 self.log(ub_target=ub_target)
                 if lb_unsafe < ub_init:
-                    print(
+                    logger.warning(
                         "WARNING: RSM is lower at unsafe than in init. No Reach-avoid/Safety guarantees can be obtained."
                     )
                     if float(self.verifier.prob) < 1.0:
@@ -380,7 +380,7 @@ class RSMLoop:
                 self.log(lb_unsafe=lb_unsafe)
                 self.log(lb_domain=lb_domain)
                 if lb_unsafe < ub_init:
-                    print(
+                    logger.warning(
                         "WARNING: RSM is lower at unsafe than in init. No Reach-avoid/Safety guarantees can be obtained."
                     )
                     if float(self.verifier.prob) < 1.0:
@@ -465,16 +465,10 @@ class RSMLoop:
                 lb_unsafe = lb_unsafe / np.maximum(ub_target, 1e-6)
                 lip_l = lip_l / np.maximum(ub_target, 1e-6)
                 if lb_unsafe <= 1 + lip_l * big_d:
-                    print(
-                        "{Unsafe states are not greater than the bound. the actual lb: ",
-                        lb_unsafe,
-                        ", the desired lower bound: ",
-                        1 + lip_l * big_d,
-                        ", lip_v: ",
-                        lip_l,
-                        ", big delta: ",
-                        big_d,
-                        "}"
+                    logger.warning(
+                        "Unsafe states are not greater than the bound. The actual lb: "
+                        f"{lb_unsafe}, the desired lower bound: {1 + lip_l * big_d}, "
+                        f"lip_v: {lip_l}, big delta: {big_d}"
                     )
                     return None
                 p = (1 + lip_l * big_d) / lb_unsafe
@@ -515,9 +509,9 @@ class RSMLoop:
             self.log(iter=self.iter)
 
             if runtime > timeout:
-                print("Timeout!")
+                logger.warning("Timeout!")
                 return False
-            print(
+            logger.info(
                 f"\n#### Iteration {self.iter} (runtime: {pretty_time(runtime)}) #####"
             )
             if not self.no_train and (not self.skip_first or (self.skip_first and self.iter > 0)):
@@ -542,19 +536,19 @@ class RSMLoop:
 
             if actual_prob is not None:
                 if self.verifier.spec == "reach_avoid":
-                    print(
+                    logger.info(
                         f"Probability of reaching the target safely is at least {actual_prob * 100:0.3f}%"
                     )
                 elif self.verifier.spec == "stability":
-                    print(
+                    logger.info(
                         f"Stability bound is {actual_prob * 100:0.3f}%"
                     )
                 elif self.verifier.spec == "safety":
-                    print(
+                    logger.info(
                         f"Safety bound is at least {actual_prob * 100:0.3f}%"
                     )
                 elif self.verifier.spec == "reachability":
-                    print(
+                    logger.info(
                         f"Reachability bound is at least {actual_prob * 100:0.3f}%"
                     )
                 if self.verifier.spec == 'stability' and self.plot:
@@ -566,7 +560,7 @@ class RSMLoop:
                                                          self.info['lb_domain'],
                                                          f"{self.exp_name}/plots/{self.env.name}_contour_lines.pdf")
                     except Exception as e:
-                        print(f"Error plotting stability time contour: Computation difficulty")
+                        logger.error(f"Error plotting stability time contour: Computation difficulty")
 
                 return True
 
@@ -628,26 +622,26 @@ class RSMLoop:
         fig.colorbar(sc)
         ax.set_title(f"L at iter {self.iter} for {self.env.name}")
 
-        terminals_x, terminals_y = [], []
-        for i in range(30):
-            trace = self.rollout(seed=i)
-            ax.plot(
-                trace[:, i_],
-                trace[:, j_],
-                color=sns.color_palette()[0],
-                zorder=2,
-                alpha=0.3,
-            )
-            ax.scatter(
-                trace[:, i_],
-                trace[:, j_],
-                color=sns.color_palette()[0],
-                zorder=2,
-                marker=".",
-            )
-            terminals_x.append(float(trace[-1, i_]))
-            terminals_y.append(float(trace[-1, j_]))
-        ax.scatter(terminals_x, terminals_y, color="white", marker="x", zorder=5)
+        # terminals_x, terminals_y = [], []
+        # for i in range(30):
+        #     trace = self.rollout(seed=i)
+        #     ax.plot(
+        #         trace[:, i_],
+        #         trace[:, j_],
+        #         color=sns.color_palette()[0],
+        #         zorder=2,
+        #         alpha=0.3,
+        #     )
+        #     ax.scatter(
+        #         trace[:, i_],
+        #         trace[:, j_],
+        #         color=sns.color_palette()[0],
+        #         zorder=2,
+        #         marker=".",
+        #     )
+        #     terminals_x.append(float(trace[-1, i_]))
+        #     terminals_y.append(float(trace[-1, j_]))
+        # ax.scatter(terminals_x, terminals_y, color="white", marker="x", zorder=5)
         if not is_pre and self.verifier.hard_constraint_violation_buffer is not None:
             ax.scatter(
                 self.verifier.hard_constraint_violation_buffer[:, i_],

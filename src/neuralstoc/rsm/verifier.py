@@ -1,6 +1,5 @@
 import math
 import os
-import random
 import time
 from functools import partial
 
@@ -11,7 +10,10 @@ from neuralstoc.utils import (
     v_contains,
     v_intersect,
     lipschitz_l1_jax,
+    batch_apply,
 )
+
+from neuralstoc.rsm.train_buffer import TrainBuffer
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 import jax
@@ -25,10 +27,6 @@ import logging
 logger = logging.getLogger("neuralstoc")
 
 
-# Tensorflow should not allocate any GPU memory
-tf.config.experimental.set_visible_devices([], "GPU")
-
-
 def get_n_for_bound_computation(obs_dim):
     if obs_dim == 2:
         n = 200
@@ -39,72 +37,6 @@ def get_n_for_bound_computation(obs_dim):
     else:
         n = 25
     return n
-
-
-class TrainBuffer:
-    def __init__(self, max_size=2_000_000):
-        """Counterexample training buffer"""
-        logger.info(f"Initializing training buffer with max size {max_size}")
-        self.s = []
-        self.max_size = max_size
-        self._cached_ds = None
-
-    def append(self, s):
-        s = np.array(s)
-        self.s.append(s)
-        self._cached_ds = None
-        if self.max_size is not None and len(self) > self.max_size:
-            train_s = np.concatenate(self.s, axis=0).tolist()
-            random.shuffle(train_s)
-            self.clear()
-            self.s.append(np.array(train_s[: self.max_size]))
-
-    def extend(self, lst):
-        lst = [np.array(s) for s in lst]
-        if len(lst) == 0:
-            return
-        concat = np.concatenate(lst, axis=0)
-        self.append(concat)
-
-    def clear(self):
-        self.s = []
-        self._cached_ds = None
-
-    def __len__(self):
-        if len(self.s) == 0:
-            return 0
-        return sum([s.shape[0] for s in self.s])
-
-    @property
-    def in_dim(self):
-        return len(self.s[0])
-
-    def as_tfds(self, batch_size=32):
-        if self._cached_ds is not None:
-            return self._cached_ds
-        train_s = np.concatenate(self.s, axis=0)
-        train_s = np.random.default_rng().permutation(train_s)
-        train_ds = tf.data.Dataset.from_tensor_slices(train_s)
-        train_ds = train_ds.shuffle(50000).batch(batch_size).prefetch(tf.data.AUTOTUNE)
-        self._cached_ds = train_ds
-        return train_ds
-
-    def is_empty(self):
-        if len(self.s) == 0:
-            return True
-        return False
-
-    def get_list(self, batch_size=None):
-        if len(self.s) == 0:
-            return []
-        if batch_size is None:
-            return self.s
-        else:
-            new_s = []
-            for s in self.s:
-                for i in range(0, len(s), batch_size):
-                    new_s.append(s[i : i + batch_size])
-            return new_s
 
 
 class RSMVerifier:
@@ -411,7 +343,7 @@ class RSMVerifier:
         """
         if self._cached_filtered_grid is not None:
             if n == self._cached_filtered_grid:
-                print(f"Using cached grid of n={n} ", end="", flush=True)
+                logger.info(f"Using cached grid of n={n} ", end="", flush=True)
                 return self._cached_filtered_grid[1], self._cached_filtered_grid[2]
             else:
                 self._cached_filtered_grid = None
@@ -419,11 +351,6 @@ class RSMVerifier:
 
         gc.collect()
         size_t = 4 * (n**self.env.observation_dim)
-        print(
-            f"Allocating grid of n={n} ({pretty_number(size_t)} bytes)",
-            end="",
-            flush=True,
-        )
         dims = self.env.observation_space.shape[0]
         grid, steps = [], []
         for i in range(dims):
@@ -436,7 +363,7 @@ class RSMVerifier:
             )
             grid.append(samples)
             steps.append(step)
-        print(f" meshgrid with steps={steps} ", end="", flush=True)
+        logger.info(f"Allocating grid of n={n} ({pretty_number(size_t)} bytes) meshgrid with steps={steps}")
         grid = np.meshgrid(*grid)
         grid = [grid[i].flatten() + steps[i] / 2 for i in range(dims)]
         grid = np.stack(grid, axis=1)
@@ -773,10 +700,10 @@ class RSMVerifier:
         _, ub_init = self.compute_bound_init(n)
         domain_min, _ = self.compute_bound_domain(n)
         _, ub_target = self.compute_bound_target(n)
-        print(f"computed bounds done: {pretty_time(time.time()-verify_start_time)}")
+        logger.info(f"computed bounds done: {pretty_time(time.time()-verify_start_time)}")
 
         grid, steps = self.get_filtered_grid(self.grid_size)
-        print(f"allocated grid done: {pretty_time(time.time()-verify_start_time)}")
+        logger.info(f"allocated grid done: {pretty_time(time.time()-verify_start_time)}")
         if self.norm == "l1":
             delta = 0.5 * np.sum(steps)
             # l1-norm of the half the grid cell (=l1 distance from center to corner)
@@ -787,7 +714,7 @@ class RSMVerifier:
         K = lipschitz_k * delta
 
         number_of_cells = self.grid_size**self.env.observation_dim
-        print(
+        logger.info(
             f"Checking GRID with {pretty_number(number_of_cells)} cells"
         )
         K = jnp.float32(K)
@@ -802,8 +729,18 @@ class RSMVerifier:
         hard_violation_buffer = []
         violation_min_val = jnp.inf
 
-        print(f"loop start: {pretty_time(time.time()-verify_start_time)}")
+        logger.info(f"loop start: {pretty_time(time.time()-verify_start_time)}")
         kernel_start_time = time.perf_counter()
+
+
+        if self.spec == "reachability" or self.spec == "reach_avoid":
+            logger.info("Filtering out cells with too high potential")
+            v = batch_apply(self.learner.v_state.apply_fn, grid, params=(self.learner.v_state.params,), batch_size=1024*128).flatten()
+            K_local = self.assign_local_lip(grid, K)
+            normalized_l, normalized_K = self.normalize_rsm(v, ub_init, domain_min, K_local, ub_target)
+            grid = grid[normalized_l - normalized_K < 1 / (1 - self.prob)]
+
+
         pbar = tqdm(total=grid.shape[0], unit="cells")
         for start in range(0, grid.shape[0], self.batch_size):
             end = min(start + self.batch_size, grid.shape[0])
@@ -886,13 +823,13 @@ class RSMVerifier:
             )
 
         pbar.close()
-        print(f"loop ends: {pretty_time(time.time()-verify_start_time)}")
+        logger.info(f"loop ends: {pretty_time(time.time()-verify_start_time)}")
         if failed_fast:
-            print(
+            logger.info(
                 f"Failed fast after {pretty_number(total_cells_processed)}/{pretty_number(number_of_cells)} cells checked"
             )
         if len(violation_buffer) == 1:
-            print(f"violation_buffer[0][0]:", violation_buffer[0][0])
+            logger.info(f"violation_buffer[0][0]:", violation_buffer[0][0])
         self.hard_constraint_violation_buffer = (
             None
             if len(hard_violation_buffer) == 0
@@ -905,7 +842,7 @@ class RSMVerifier:
             self.train_buffer.extend(hard_violation_buffer)
         else:
             raise ValueError(f"Unknown dataset type {self.dataset_type}")
-        print(
+        logger.info(
             f"Verified {pretty_number(total_cells_processed)} cells ({pretty_number(violations)} violations, {pretty_number(hard_violations)} hard) in {pretty_time(time.time()-verify_start_time)}"
         )
 
@@ -916,7 +853,7 @@ class RSMVerifier:
             and violations > 0
             and len(violation_buffer) > 0
         ):
-            print(
+            logger.info(
                 f"Zero hard violations -> refinement of {pretty_number(grid_total_size)} soft violations"
             )
             refine_start = time.time()
@@ -926,12 +863,12 @@ class RSMVerifier:
                 refinement_buffer, lipschitz_k, steps, ub_init, domain_min, ub_target, ra_bounds
             )
             if success:
-                print(
+                logger.info(
                     f"Refinement successful! (took {pretty_time(time.time()-refine_start)})"
                 )
                 return 0, 0, float(max_decrease), float(max_decay), float(violation_min_val)
             else:
-                print(
+                logger.info(
                     f"Refinement unsuccessful! (took {pretty_time(time.time()-refine_start)})"
                 )
 
@@ -1064,7 +1001,7 @@ class RSMVerifier:
         Returns:
             ndarray: Grid points in the safe region of the state space
         """
-        print(f"Allocating grid of n={n} ", end="", flush=True)
+        # print(f"Allocating grid of n={n} ", end="", flush=True)
         dims = self.env.observation_space.shape[0]
         grid, steps = [], []
         for i in range(dims):
@@ -1077,7 +1014,8 @@ class RSMVerifier:
             )
             grid.append(samples)
             steps.append(step)
-        print(f" meshgrid with steps={steps} ", end="", flush=True)
+        # print(f" meshgrid with steps={steps} ", end="", flush=True)
+        logger.info(f"Allocating grid of n={n} meshgrid with steps={steps}")
         grid = np.meshgrid(*grid)
         grid = [grid[i].flatten() + steps[i] / 2 for i in range(dims)]
         grid = np.stack(grid, axis=1)
@@ -1124,7 +1062,6 @@ class RSMVerifier:
         Returns:
             ndarray: Grid points that are d-distance from unsafe regions
         """
-        print(f"Allocating grid of n={n} ", end="", flush=True)
         dims = self.env.observation_space.shape[0]
         grid, steps = [], []
         for i in range(dims):
@@ -1137,7 +1074,9 @@ class RSMVerifier:
             )
             grid.append(samples)
             steps.append(step)
-        print(f" meshgrid with steps={steps} ", end="", flush=True)
+        # print(f"Allocating grid of n={n} ", end="", flush=True)
+        # print(f" meshgrid with steps={steps} ", end="", flush=True)
+        logger.info(f"Allocating grid of n={n} meshgrid with steps={steps}")
         grid = np.meshgrid(*grid)
         grid = [grid[i].flatten() + steps[i] / 2 for i in range(dims)]
         grid = np.stack(grid, axis=1)

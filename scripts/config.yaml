@@ -13,9 +13,11 @@ model: "tmlp"  # Model type: "mlp" or "tmlp"
 
 # Batch and Grid Sizes
 batch_size: "32k"  # Batch size for verification
-learner_batch_size: "32k"  # Batch size for learning
-grid_size: "32M"  # Grid size for verification
-buffer_size: 6000000  # Buffer size
+learner_batch_size: "8k"  # Batch size for learning
+# grid_size: "32M"  # Grid size for verification
+grid_size: "1M"
+# buffer_size: 6000000  # Buffer size
+buffer_size: 150000
 
 # PPO Settings
 n_step: 1  # Number of steps per PPO update

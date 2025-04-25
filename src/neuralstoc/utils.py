@@ -213,6 +213,41 @@ def triangular(rng_key, shape):
     return jnp.where(U <= 0.5, p1, p2)
 
 
+def batch_apply(func, xs, params=tuple(), batch_size=1024*16, output_num=None):
+    """
+        Apply a function to a vector of inputs in batches.
+
+        :param func: Function to apply.
+        :param xs: Inputs to the function.
+        :param params: Static parameters to the function that are passed as first arguments.
+        :param batch_size: Size of each batch.
+        :param output_shape: Shape of the output.
+        :param output_num: Number of outputs. If None, the function is assumed to return a single output.
+        :param bar: Whether to show a progress bar.
+    """
+    if output_num is None:
+        outputs = []
+    else:
+        outputs = [[] for _ in range(output_num)]
+
+    for start in range(0, len(xs), batch_size):
+        end = min(start + batch_size, len(xs))
+        input_axis = tuple(None for _ in params) + (0,) * len(xs.shape[1:])
+        batch_output = jax.vmap(func, input_axis)(*params, xs[start:end])
+        if output_num is None:
+            outputs.append(batch_output)
+        else:
+            for i in range(output_num):
+                outputs[i].append(batch_output[i])
+
+    if output_num is None:
+        return jnp.concatenate(outputs)
+    else:
+        for i in range(output_num):
+            outputs[i] = jnp.concatenate(outputs[i], axis=0)
+        return outputs
+
+
 class TMLP(tnn.Module):
     """
     A PyTorch implementation of a multi-layer perceptron.
