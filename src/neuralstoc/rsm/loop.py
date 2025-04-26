@@ -12,7 +12,7 @@ from neuralstoc.utils import (
     triangular,
     pretty_time,
     pretty_number,
-    lipschitz_linf_jax, compute_local_lipschitz,
+    lipschitz_linf_jax, compute_local_lipschitz, lipschitz_coeff_CPLip
 )
 
 from neuralstoc.rsm.verifier import get_n_for_bound_computation
@@ -65,6 +65,8 @@ class RSMLoop:
             rollback_threshold=0.99,
             no_train=False,
             skip_first=False,
+            epochs=50,
+            initial_epochs=200,
     ):
         """
         Initialize the Learner-Verifier loop
@@ -98,6 +100,8 @@ class RSMLoop:
         self.rollback_threshold = rollback_threshold
         self.no_train = no_train
         self.skip_first = skip_first
+        self.epochs = epochs
+        self.initial_epochs = initial_epochs
 
         os.makedirs(exp_name, exist_ok=True)
         os.makedirs(f"{exp_name}/plots", exist_ok=True)
@@ -119,8 +123,13 @@ class RSMLoop:
         start_metrics = None
         self.learner.grid_size = self.verifier.grid_size
         num_epochs = (
-            50 if self.iter > 0 else 200
+            self.epochs if self.iter > 0 else self.initial_epochs
         )  # in the first iteration we train a bit longer
+
+        if num_epochs == 0:
+            logger.info("Skipping training")
+            return
+
         logger.info(f"Learning for {num_epochs} epochs. {train_ds}")
         if self.iter > 2:
             self.learner.init_with_static = False
@@ -178,13 +187,11 @@ class RSMLoop:
                 else:
                     K_p = self.learner.K_p
                 K_l = compute_local_lipschitz(self.learner.v_tnet, grid, eps)
+
                 self.verifier.cached_lip_l_linf = jnp.float32(K_l)
                 self.verifier.cached_lip_p_linf = jnp.float32(K_p)
-                logger.debug('local K_l:', K_l)
-                logger.debug('local K_p:', K_p)
                 K_f = self.env.lipschitz_constant_linf
                 lipschitz_k = K_l * K_f * np.maximum(1, K_p) + K_l
-                logger.debug('lip_k: ', lipschitz_k)
 
                 self.log(eps=eps)
                 global_K_l = lipschitz_linf_jax(self.learner.v_state.params).item()
@@ -193,6 +200,20 @@ class RSMLoop:
                 self.log(K_p=global_K_p)
                 self.learner.lip_lambda_l = np.max(K_l) / global_K_l
                 self.learner.lip_lambda_p = np.max(K_p) / global_K_p
+    
+                logger.debug(f'local K_l: {K_l}')
+                logger.debug(f'global K_l: {global_K_l}')
+                for CPLip in [True, False]:
+                    for weighted in [True, False]:
+                        lip = lipschitz_coeff_CPLip(self.learner.v_state.params, True, CPLip=CPLip, weighted=weighted)[0].item()
+                        logger.debug(f'global K_l CPLip={CPLip}, weighted={weighted}: {lip}')
+                logger.debug(f'local K_p: {K_p}')
+                logger.debug(f'global K_p: {global_K_p}')
+                for CPLip in [True, False]:
+                    for weighted in [True, False]:
+                        lip = lipschitz_coeff_CPLip(self.learner.p_state.params, True, CPLip=CPLip, weighted=weighted, obs_normalization=self.learner.obs_normalization)[0].item()
+                        logger.debug(f'global K_p CPLip={CPLip}, weighted={weighted}: {lip}')
+                logger.debug(f'lip_k: {lipschitz_k}')
             else:
                 K_p = lipschitz_linf_jax(self.learner.p_state.params, obs_normalization=self.learner.obs_normalization).item()
                 K_l = lipschitz_linf_jax(self.learner.v_state.params).item()
@@ -368,7 +389,7 @@ class RSMLoop:
                     f.write(f"iter = {self.iter}\n")
 
                 if (
-                        self.soft_constraint or actual_prob >= self.verifier.prob
+                        self.soft_constraint or best_reach_bound >= self.verifier.prob
                 ) and self.iter >= self.min_iters:
                     return best_reach_bound
                 return None

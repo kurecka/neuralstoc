@@ -153,6 +153,8 @@ if __name__ == "__main__":
     parser.add_argument("--rollback_threshold", default=0.99, type=float)
     parser.add_argument("--smoke_test", action="store_true")
     parser.add_argument("--logger_level", default="ERROR")
+    parser.add_argument("--epochs", default=50, type=int)
+    parser.add_argument("--initial_epochs", default=50, type=int)
 
     args = parser.parse_args()
 
@@ -302,6 +304,8 @@ if __name__ == "__main__":
         rollback_threshold=args.rollback_threshold,
         no_train=args.no_train,
         skip_first=args.continue_rsm > 0,
+        epochs=args.epochs,
+        initial_epochs=args.initial_epochs,
     )
     logger.info("Evaluating the policy")
     txt_return, res_dict = learner.evaluate_rl()

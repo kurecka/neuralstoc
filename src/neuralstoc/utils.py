@@ -18,6 +18,9 @@ from auto_LiRPA import BoundedModule, BoundedTensor
 from auto_LiRPA.perturbations import PerturbationLpNorm
 from brax.training import distribution
 
+import logging
+logger = logging.getLogger("neuralstoc")
+
 
 def pretty_time(elapsed):
     """
@@ -359,6 +362,218 @@ def lipschitz_linf_jax(params, obs_normalization=None):
     return lipschitz_linf
 
 
+@partial(jax.jit, static_argnums=(1, 2, 3,))
+def lipschitz_coeff_CPLip(params, Linfty, weighted=True, CPLip=True, obs_normalization=None):
+    '''
+    Function to compute Lipschitz constants using the techniques presented in the paper.
+
+    :param params: Neural network parameters.
+    :param weighted: If true, use weighted norms.
+    :param CPLip: If true, use the average activation operators (cplip) improvement.
+    :param Linfty: If true, use Linfty norm; If false, use L1 norm (currently only L1 norm is used).
+    :return: Lipschitz constant and list of weights (or None if weighted is False).
+    '''
+
+    if Linfty:
+        axis = 0
+    else:
+        axis = 1
+
+    minweight = jnp.float32(1e-6)
+    maxweight = jnp.float32(1e6)
+
+    if (not weighted and not CPLip):
+        L = jnp.float32(1)
+        # Compute Lipschitz coefficient by iterating through layers
+        for layer in params["params"].values():
+            # Involve only the 'kernel' dictionaries of each layer in the network, which are the weight matrices
+            if "kernel" in layer:
+                L *= jnp.max(jnp.sum(jnp.abs(layer["kernel"]), axis=axis))
+
+    elif (not weighted and CPLip):
+        L = jnp.float32(0)
+        matrices = []
+        for layer in params["params"].values():
+            # Collect all weight matrices of the network
+            if "kernel" in layer:
+                matrices.append(layer["kernel"])
+
+        nmatrices = len(matrices)
+        # Create a list with all products of consecutive weight matrices
+        # products[i][j] is the matrix product matrices[i + j] ... matrices[j]
+        products = [matrices]
+        prodnorms = [[jnp.max(jnp.sum(jnp.abs(mat), axis=axis)) for mat in matrices]]
+        for nprods in range(1, nmatrices):
+            prod_list = []
+            for idx in range(nmatrices - nprods):
+                prod_list.append(jnp.matmul(products[nprods - 1][idx], matrices[idx + nprods]))
+            products.append(prod_list)
+            prodnorms.append([jnp.max(jnp.sum(jnp.abs(mat), axis=axis)) for mat in prod_list])
+
+        ncombs = 1 << (nmatrices - 1)
+        for idx in range(ncombs):
+            # To iterate over all possible ways of putting norms or products between the layers, 
+            #  interpret idx as binary number of length (nmatrices - 1),
+            # where the jth bit determines whether to put a norm or a product between layers j and j+1
+            # We use that the (nmatrices - 1)th bit of such number is always 0, which implies that
+            # each layer is taken into account for each term in the sum. 
+            jprev = 0
+            Lloc = jnp.float32(1)
+            for jcur in range(nmatrices):
+                if idx & (1 << jcur) == 0: 
+                    Lloc *= prodnorms[jcur - jprev][jprev]
+                    jprev = jcur + 1
+
+            L += Lloc / ncombs
+
+
+    elif (weighted and not CPLip and not Linfty):
+        L = jnp.float32(1)
+        matrices = []
+        for layer in params["params"].values():
+            # Collect all weight matrices of the network
+            if "kernel" in layer:
+                matrices.append(layer["kernel"])
+        matrices.reverse()
+
+        weights = [jnp.ones(jnp.shape(matrices[0])[1])]
+        for mat in matrices:
+            colsums = jnp.sum(jnp.multiply(jnp.abs(mat), weights[-1][jnp.newaxis, :]), axis=1)
+            lip = jnp.maximum(jnp.max(colsums), minweight)
+            weights.append(jnp.maximum(colsums / lip, minweight))
+            L *= lip
+
+    elif (weighted and not CPLip and Linfty):
+        L = jnp.float32(1)
+        matrices = []
+        for layer in params["params"].values():
+            # Collect all weight matrices of the network
+            if "kernel" in layer:
+                matrices.append(layer["kernel"])
+
+        weights = [jnp.ones(jnp.shape(matrices[0])[0])]
+        for mat in matrices:
+            rowsums = jnp.sum(jnp.multiply(jnp.abs(mat), jnp.float32(1) / weights[-1][:, jnp.newaxis]), axis=0)
+            lip = jnp.max(rowsums)
+            weights.append(jnp.minimum(lip / rowsums, maxweight))
+            L *= lip
+
+    elif (weighted and CPLip and not Linfty):
+        L = jnp.float32(0)
+        matrices = []
+        for layer in params["params"].values():
+            # Collect all weight matrices of the network
+            if "kernel" in layer:
+                matrices.append(layer["kernel"])
+        matrices.reverse()
+
+        weights = [jnp.ones(jnp.shape(matrices[0])[1])]
+        for mat in matrices:
+            colsums = jnp.sum(jnp.multiply(jnp.abs(mat), weights[-1][jnp.newaxis, :]), axis=1)
+            lip = jnp.maximum(jnp.max(colsums), minweight)
+            weights.append(jnp.maximum(colsums / lip, minweight))
+
+        matrices.reverse()
+        nmatrices = len(matrices)
+        # Create a list with all products of consecutive weight matrices
+        # products[i][j] is the matrix product matrices[i + j] ... matrices[j]
+        products = [matrices]
+        prodnorms = [[jnp.max(jnp.multiply(jnp.sum(jnp.multiply(jnp.abs(matrices[idx]),
+                                                                weights[-(idx + 2)][jnp.newaxis, :]), axis=1),
+                                           jnp.float32(1) / weights[-(idx + 1)]))
+                      for idx in range(nmatrices)]]
+        for nprods in range(1, nmatrices):
+            prod_list = []
+            for idx in range(nmatrices - nprods):
+                prod_list.append(jnp.matmul(products[nprods - 1][idx], matrices[idx + nprods]))
+            products.append(prod_list)
+            prodnorms.append([jnp.max(jnp.multiply(jnp.sum(jnp.multiply(jnp.abs(prod_list[idx]),
+                                                                        weights[-(idx + nprods + 2)][jnp.newaxis, :]),
+                                                           axis=1),
+                                                   jnp.float32(1) / weights[-(idx + 1)]))
+                              for idx in range(nmatrices - nprods)])
+
+        ncombs = 1 << (nmatrices - 1)
+        for idx in range(ncombs):
+            # To iterate over all possible ways of putting norms or products between the layers, 
+            #  interpret idx as binary number of length (nmatrices - 1),
+            # where the jth bit determines whether to put a norm or a product between layers j and j+1
+            # We use that the (nmatrices - 1)th bit of such number is always 0, which implies that
+            # each layer is taken into account for each term in the sum. 
+            jprev = 0
+            Lloc = jnp.float32(1)
+            for jcur in range(nmatrices):
+                if idx & (1 << jcur) == 0: 
+                    Lloc *= prodnorms[jcur - jprev][jprev]
+                    jprev = jcur + 1
+
+            L += Lloc / ncombs
+
+    elif (weighted and CPLip and Linfty):
+        L = jnp.float32(0)
+        matrices = []
+        for layer in params["params"].values():
+            # Collect all weight matrices of the network
+            if "kernel" in layer:
+                matrices.append(layer["kernel"])
+
+        weights = [jnp.ones(jnp.shape(matrices[0])[0])]
+        for mat in matrices:
+            rowsums = jnp.sum(jnp.multiply(jnp.abs(mat), jnp.float32(1) / weights[-1][:, jnp.newaxis]), axis=0)
+            lip = jnp.max(rowsums)
+            weights.append(jnp.minimum(lip / rowsums, maxweight))
+        weights.reverse()
+
+        nmatrices = len(matrices)
+        # Create a list with all products of consecutive weight matrices
+        # products[i][j] is the matrix product matrices[i + j] ... matrices[j]
+        products = [matrices]
+        prodnorms = [[jnp.max(jnp.multiply(jnp.sum(jnp.multiply(jnp.abs(matrices[idx]),
+                                                                jnp.float32(1) / weights[-(idx + 1)][:, jnp.newaxis]),
+                                                   axis=0),
+                                           weights[-(idx + 2)]))
+                      for idx in range(nmatrices)]]
+        for nprods in range(1, nmatrices):
+            prod_list = []
+            for idx in range(nmatrices - nprods):
+                prod_list.append(jnp.matmul(products[nprods - 1][idx], matrices[idx + nprods]))
+            products.append(prod_list)
+            prodnorms.append([jnp.max(jnp.multiply(jnp.sum(jnp.multiply(jnp.abs(prod_list[idx]),
+                                                                        jnp.float32(1) / weights[-(idx + 1)][:,
+                                                                                         jnp.newaxis]), axis=0),
+                                                   weights[-(idx + nprods + 2)]))
+                              for idx in range(nmatrices - nprods)])
+
+        ncombs = 1 << (nmatrices - 1)
+        for idx in range(ncombs):
+            # To iterate over all possible ways of putting norms or products between the layers, 
+            #  interpret idx as binary number of length (nmatrices - 1),
+            # where the jth bit determines whether to put a norm or a product between layers j and j+1
+            # We use that the (nmatrices - 1)th bit of such number is always 0, which implies that
+            # each layer is taken into account for each term in the sum. 
+            jprev = 0
+            Lloc = jnp.float32(1)
+            for jcur in range(nmatrices):
+                if idx & (1 << jcur) == 0:
+                    Lloc *= prodnorms[jcur - jprev][jprev]
+                    jprev = jcur + 1
+
+            L += Lloc / ncombs
+
+        weights.reverse()
+
+    if obs_normalization is not None:
+        if Linfty:
+            L *= jnp.max(1 / obs_normalization.std)
+        else:
+            L *= jnp.sum(1 / obs_normalization.std)
+
+    if weighted:
+        return L, weights[-1]
+    else:
+        return L, None
+
+
 def compute_local_lipschitz(tnet, x0, eps, out_dim=1, obs_normalization=None):
     """
     Computes the local Lipschitz constant around a given point x0.
@@ -457,9 +672,12 @@ def set_tnet_params(params, tnet):
     """
     Sets the parameters of a PyTorch network from JAX parameters.
     """
+    device = tnet.seq[0].weight.device
+
     for i, (k, v) in enumerate(params["params"].items()):
-        tnet.seq[2 * i].weight = tnn.Parameter(torch.from_numpy(np.array(v["kernel"]).T).float())
-        tnet.seq[2 * i].bias = tnn.Parameter(torch.from_numpy(np.array(v["bias"])).float())
+        logger.debug(f"Set params from layer {k} to TNet layer {2*i}")
+        tnet.seq[2 * i].weight = tnn.Parameter(torch.from_numpy(np.array(v["kernel"]).T).float().to(device))
+        tnet.seq[2 * i].bias = tnn.Parameter(torch.from_numpy(np.array(v["bias"])).float().to(device))
 
 
 def create_train_state(model, rng, in_dim, learning_rate, ema=0, clip_norm=None,
