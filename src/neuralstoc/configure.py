@@ -3,6 +3,8 @@ import os
 import sys
 import yaml
 
+from neuralstoc.monitor import ExperimentMonitor
+
 import logging
 logger = logging.getLogger("neuralstoc")
 
@@ -70,7 +72,8 @@ def configure():
         3. Default values
 
         Returns:
-            argparse.Namespace: Parsed command line arguments with configuration values        
+            argparse.Namespace: Parsed command line arguments with configuration values
+            ExperimentMonitor: Monitor object for experiment tracking
     """
 
     parser = argparse.ArgumentParser()
@@ -161,5 +164,6 @@ def configure():
 
     # Create checkpoints directory if it doesn't exist
     os.makedirs("checkpoints", exist_ok=True)
+    monitor = ExperimentMonitor(args.exp_name)
 
-    return args
+    return args, monitor

@@ -3,6 +3,7 @@ checkpoints
 global_summary.txt
 initialize_results.txt
 study_results
+outputs
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

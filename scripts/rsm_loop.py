@@ -17,7 +17,7 @@ logger = logging.getLogger("neuralstoc")
 logger.setLevel(logging.DEBUG)
 
 if __name__ == "__main__":
-    args = configure()
+    args, monitor = configure()
     
     env = get_env(args)
 
@@ -97,6 +97,7 @@ if __name__ == "__main__":
         learner,
         verifier,
         env,
+        monitor,
         plot=args.plot,
         train_p=args.train_p,
         min_iters=args.min_iters,
@@ -113,7 +114,7 @@ if __name__ == "__main__":
     txt_return, res_dict = learner.evaluate_rl()
 
     logger.info("Plotting")
-    loop.plot_l(f"{loop.exp_name}/plots/{args.env}_start_{args.exp_name}.png")
+    monitor.plot_l(env, verifier, learner, f"plots/{args.env}_start_{args.exp_name}.png")
     with open("initialize_results.txt", "a") as f:
         f.write(f"{args.env}: {txt_return}\n")
 
@@ -133,27 +134,7 @@ if __name__ == "__main__":
     sat = loop.run(args.timeout * 60)
 
     logger.info("Plotting")
-    loop.plot_l(f"{loop.exp_name}/plots/{args.env}_end_{args.exp_name}.png")
+    monitor.plot_l(env, verifier, learner, f"plots/{args.env}_end_{args.exp_name}.png")
 
     logger.info("Writing results")
-    os.makedirs("study_results", exist_ok=True)
-    env_name = args.env.split("_")
-    if len(env_name) > 2:
-        env_name = env_name[0] + "_" + env_name[1]
-    else:
-        env_name = args.env
-    cmd_line = " ".join(sys.argv)
-    with open(f"study_results/info_{env_name}.log", "a") as f:
-        f.write(f"python3 {cmd_line}\n")
-        f.write("    args=" + str(vars(args)) + "\n")
-        f.write("    return =" + txt_return + "\n")
-        f.write("    info=" + str(loop.info) + "\n")
-        f.write("    sat=" + str(sat) + "\n")
-        f.write("\n\n")
-    with open(f"global_summary.txt", "a") as f:
-        f.write(f"{cmd_line}\n")
-        f.write("    args=" + str(vars(args)) + "\n")
-        f.write("    return =" + txt_return + "\n")
-        f.write("    info=" + str(loop.info) + "\n")
-        f.write("    sat=" + str(sat) + "\n")
-        f.write("\n\n")
+    monitor.write_results(args, txt_return, sat)

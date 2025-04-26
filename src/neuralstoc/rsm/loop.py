@@ -56,6 +56,7 @@ class RSMLoop:
             learner,
             verifier,
             env,
+            monitor,
             plot,
             soft_constraint=False,
             train_p=0,
@@ -91,6 +92,7 @@ class RSMLoop:
         self.env = env
         self.learner = learner
         self.verifier = verifier
+        self.monitor = monitor
         self.train_p = train_p
         self.min_iters = min_iters
         self.soft_constraint = soft_constraint
@@ -112,9 +114,9 @@ class RSMLoop:
         self.best_prob = 0
         self.plot = plot
         self.prefill_delta = 0
-        self.iter = 0
-        self.info = {}
         self.exp_name = exp_name
+        self.iter = 0
+        self.log(iter=self.iter)
 
     def learn(self):
 
@@ -152,7 +154,7 @@ class RSMLoop:
                 f"Train [v={train_v}, p={train_p}]: loss={metrics['loss']:0.3g}, dec_loss={metrics['dec_loss']:0.3g}, violations={metrics['train_violations']:0.3g}, kp_param={metrics['kp_param']}"
             )
         pbar.close()
-        self.info["ds_size"] = len(self.verifier.train_buffer)
+        self.log(ds_size=len(self.verifier.train_buffer))
 
         training_time = pretty_time(time.time() - start_time)
 
@@ -263,11 +265,13 @@ class RSMLoop:
             max_decay,
             violation_min_val
         ) = self.verifier.check_dec_cond(lipschitz_k)
-        self.log(violations=int(violations))
-        self.log(hard_violations=int(hard_violations))
-        self.log(max_decrease=max_decrease)
-        self.log(max_decay=max_decay)
-        self.log(violation_min_val=violation_min_val)
+        self.log(
+            violations=int(violations),
+            hard_violations=int(hard_violations),
+            max_decrease=max_decrease,
+            max_decay=max_decay,
+            violation_min_val=violation_min_val,
+        )
 
         if violations == 0:
             return True, max_decrease
@@ -323,10 +327,12 @@ class RSMLoop:
                 lb_unsafe, _ = self.verifier.compute_bound_unsafe(n)
                 lb_domain, _ = self.verifier.compute_bound_domain(n)
                 _, ub_target = self.verifier.compute_bound_target(n)
-                self.log(ub_init=ub_init)
-                self.log(lb_unsafe=lb_unsafe)
-                self.log(lb_domain=lb_domain)
-                self.log(ub_target=ub_target)
+                self.log(
+                    ub_init=ub_init,
+                    lb_unsafe=lb_unsafe,
+                    lb_domain=lb_domain,
+                    ub_target=ub_target,
+                )
                 if lb_unsafe < ub_init:
                     logger.warning(
                         "WARNING: RSM is lower at unsafe than in init. No Reach-avoid/Safety guarantees can be obtained."
@@ -347,25 +353,30 @@ class RSMLoop:
                      violation_min_val
                      ) = self.verifier.check_dec_cond(lipschitz_k,
                                                       ra_bounds=(1 / (1 - self.verifier.prob), lb_unsafe))
-                    self.log(max_decrease=np.maximum(max_decrease, self.info["max_decrease"]))
-                    self.log(max_decay=np.maximum(max_decay, self.info["max_decay"]))
+                    self.log(
+                        max_decrease=np.maximum(max_decrease, self.info["max_decrease"]),
+                        max_decay=np.maximum(max_decay, self.info["max_decay"]),
+                    )
                     if violation_min_val < lb_unsafe:
                         lb_unsafe = violation_min_val
                         actual_prob = 1 - 1 / np.clip(lb_unsafe, 1e-9, None)
-                self.log(old_prob=actual_prob)
-                self.log(actual_prob=actual_prob)
 
                 num = -2 * (-self.info["max_decrease"]) * (lb_unsafe - 1)
                 denom = np.square(self.info["K_l"]) * np.square(self.env.delta)
                 other_prob = 1 - np.exp(num / np.clip(denom, 1e-9, None))
-                self.log(other_prob=other_prob)
+
                 best_reach_bound = np.maximum(actual_prob, other_prob)
 
                 N = np.floor((lb_unsafe - 1) / (self.info["K_l"] * self.env.delta))
                 improved_bound = 1 - 1 / np.clip(lb_unsafe, 1e-9, None) * (
                         self.info["max_decay"] ** N
                 )
-                self.log(improved_bound=improved_bound)
+                self.log(
+                    old_prob=actual_prob,
+                    actual_prob=actual_prob,
+                    other_prob=other_prob,
+                    improved_bound=improved_bound,
+                )
                 best_reach_bound = np.maximum(best_reach_bound, improved_bound)
                 self.best_prob = np.maximum(self.best_prob, best_reach_bound)
 
@@ -397,9 +408,11 @@ class RSMLoop:
                 _, ub_init = self.verifier.compute_bound_init(n)
                 lb_unsafe, _ = self.verifier.compute_bound_unsafe(n)
                 lb_domain, _ = self.verifier.compute_bound_domain(n)
-                self.log(ub_init=ub_init)
-                self.log(lb_unsafe=lb_unsafe)
-                self.log(lb_domain=lb_domain)
+                self.log(
+                    ub_init=ub_init,
+                    lb_unsafe=lb_unsafe,
+                    lb_domain=lb_domain,
+                )
                 if lb_unsafe < ub_init:
                     logger.warning(
                         "WARNING: RSM is lower at unsafe than in init. No Reach-avoid/Safety guarantees can be obtained."
@@ -420,25 +433,29 @@ class RSMLoop:
                      violation_min_val
                      ) = self.verifier.check_dec_cond(lipschitz_k,
                                                       ra_bounds=(1 / (1 - self.verifier.prob), lb_unsafe))
-                    self.log(max_decrease=np.maximum(max_decrease, self.info["max_decrease"]))
-                    self.log(max_decay=np.maximum(max_decay, self.info["max_decay"]))
+                    self.log(
+                        max_decrease=np.maximum(max_decrease, self.info["max_decrease"]),
+                        max_decay=np.maximum(max_decay, self.info["max_decay"]),
+                    )
                     if violation_min_val < lb_unsafe:
                         lb_unsafe = violation_min_val
                         actual_prob = 1 - 1 / np.clip(lb_unsafe, 1e-9, None)
-                self.log(old_prob=actual_prob)
-                self.log(actual_prob=actual_prob)
 
                 num = -2 * (-self.info["max_decrease"]) * (lb_unsafe - 1)
                 denom = np.square(self.info["K_l"]) * np.square(self.env.delta)
                 other_prob = 1 - np.exp(num / np.clip(denom, 1e-9, None))
-                self.log(other_prob=other_prob)
                 best_reach_bound = np.maximum(actual_prob, other_prob)
 
                 N = np.floor((lb_unsafe - 1) / (self.info["K_l"] * self.env.delta))
                 improved_bound = 1 - 1 / np.clip(lb_unsafe, 1e-9, None) * (
                         self.info["max_decay"] ** N
                 )
-                self.log(improved_bound=improved_bound)
+                self.log(
+                    old_prob=actual_prob,
+                    actual_prob=actual_prob,
+                    other_prob=other_prob,
+                    improved_bound=improved_bound
+                )
                 best_reach_bound = np.maximum(best_reach_bound, improved_bound)
                 self.best_prob = np.maximum(self.best_prob, best_reach_bound)
 
@@ -470,9 +487,11 @@ class RSMLoop:
                 lb_unsafe, _ = self.verifier.compute_bound_unsafe(n)
                 lb_domain, _ = self.verifier.compute_bound_domain(n)
                 _, ub_target = self.verifier.compute_bound_target(n)
-                self.log(lb_unsafe=lb_unsafe)
-                self.log(lb_domain=lb_domain)
-                self.log(ub_target=ub_target)
+                self.log(
+                    lb_unsafe=lb_unsafe,
+                    lb_domain=lb_domain,
+                    ub_target=ub_target,
+                )
                 if self.verifier.norm == "l1":
                     lip_l = lipschitz_l1_jax(self.learner.v_state.params).item()
                 else:
@@ -498,14 +517,11 @@ class RSMLoop:
         return None
 
     def log(self, **kwargs):
-        """
-        Log information about the current iteration.
-        
-        Args:
-            **kwargs: Key-value pairs to add to the info dictionary
-        """
-        for k, v in kwargs.items():
-            self.info[k] = v
+        self.monitor.log(**kwargs)
+    
+    @property
+    def info(self):
+        return self.monitor.info
 
     def run(self, timeout):
         """
@@ -526,8 +542,10 @@ class RSMLoop:
         self.prefill_delta = self.verifier.prefill_train_buffer()
         while True:
             runtime = time.time() - start_time
-            self.log(runtime=runtime)
-            self.log(iter=self.iter)
+            self.log(
+                runtime=runtime,
+                iter=self.iter,
+            )
 
             if runtime > timeout:
                 logger.warning("Timeout!")
@@ -540,7 +558,12 @@ class RSMLoop:
                 self.learn()
                 if self.plot:
                     logger.info("Plotting")
-                    self.plot_l(f"{self.exp_name}/loop/{self.env.name}_{self.iter:04d}_{self.exp_name}_pre.png", is_pre=True)
+                    self.monitor.plot_l(
+                        self.env,
+                        self.verifier,
+                        self.learner,
+                        f"loop/{self.env.name}_{self.iter:04d}_{self.exp_name}_pre.png",
+                    )
                 _, res = self.learner.evaluate_rl()
                 if res['num_end_in_target'] / res['num_traj'] < self.rollback_threshold and self.policy_rollback:
                     self.learner.p_state = p_state_copy
@@ -553,7 +576,12 @@ class RSMLoop:
 
             if self.plot:
                 logger.info("Plotting")
-                self.plot_l(f"{self.exp_name}/loop/{self.env.name}_{self.iter:04d}_{self.exp_name}.png")
+                self.plot_l(
+                    self.env,
+                    self.verifier,
+                    self.learner,
+                    f"loop/{self.env.name}_{self.iter:04d}_{self.exp_name}.png",
+                )
 
             if actual_prob is not None:
                 if self.verifier.spec == "reach_avoid":
@@ -574,18 +602,19 @@ class RSMLoop:
                     )
                 if self.verifier.spec == 'stability' and self.plot:
                     try:
-                        self.plot_stability_time_contour(self.info['p'],
-                                                         -self.info['max_decrease'],
-                                                         self.info['ub_target'] - self.info['lb_domain'],
-                                                         self.info['big_d'],
-                                                         self.info['lb_domain'],
-                                                         f"{self.exp_name}/plots/{self.env.name}_contour_lines.pdf")
+                        self.plot_stability_time_contour(
+                            self.env,
+                            self.verifier,
+                            self.learner,
+                            f"plots/{self.env.name}_contour_lines.pdf"
+                        )
                     except Exception as e:
                         logger.error(f"Error plotting stability time contour: Computation difficulty")
 
                 return True
 
             self.iter += 1
+            self.log(iter=self.iter)
 
     def rollout(self, seed=None):
         """
@@ -617,159 +646,3 @@ class RSMLoop:
             obs = next_state + noise
             trace.append(np.array(obs))
         return np.stack(trace, axis=0)
-
-    def plot_l(self, filename, is_pre=False):
-        """
-        Plot the neural supermartingale certificate function over the state space.
-        
-        Creates a visualization of the certificate function, highlighting regions 
-        like target sets, unsafe sets, and initial states. For 2D environments, 
-        it plots a heatmap of the certificate values. For higher dimensions, 
-        it projects to the specified plot dimensions.
-        
-        Args:
-            filename: Path to save the plot
-            is_pre: Whether this is a pre-verification plot (default: False)
-        """
-        i_, j_ = self.env.plot_dims
-        grid, _, _ = self.verifier.get_unfiltered_grid(n=50)
-        for target_ind, source_ind in self.env.plot_dim_map.items():
-            grid[:, target_ind] = grid[:, source_ind]
-        l = self.learner.v_state.apply_fn(self.learner.v_state.params, grid).flatten()
-        l = np.array(l)
-        sns.set()
-        fig, ax = plt.subplots(figsize=(6, 6))
-        sc = ax.scatter(grid[:, i_], grid[:, j_], marker="s", c=l, zorder=1, alpha=0.7)
-        fig.colorbar(sc)
-        ax.set_title(f"L at iter {self.iter} for {self.env.name}")
-
-        # terminals_x, terminals_y = [], []
-        # for i in range(30):
-        #     trace = self.rollout(seed=i)
-        #     ax.plot(
-        #         trace[:, i_],
-        #         trace[:, j_],
-        #         color=sns.color_palette()[0],
-        #         zorder=2,
-        #         alpha=0.3,
-        #     )
-        #     ax.scatter(
-        #         trace[:, i_],
-        #         trace[:, j_],
-        #         color=sns.color_palette()[0],
-        #         zorder=2,
-        #         marker=".",
-        #     )
-        #     terminals_x.append(float(trace[-1, i_]))
-        #     terminals_y.append(float(trace[-1, j_]))
-        # ax.scatter(terminals_x, terminals_y, color="white", marker="x", zorder=5)
-        if not is_pre and self.verifier.hard_constraint_violation_buffer is not None:
-            ax.scatter(
-                self.verifier.hard_constraint_violation_buffer[:, i_],
-                self.verifier.hard_constraint_violation_buffer[:, j_],
-                color="green",
-                marker="s",
-                alpha=0.7,
-                zorder=6,
-            )
-        if self.verifier._debug_violations is not None:
-            ax.scatter(
-                self.verifier._debug_violations[:, i_],
-                self.verifier._debug_violations[:, j_],
-                color="cyan",
-                marker="s",
-                alpha=0.7,
-                zorder=6,
-            )
-        for init in self.env.init_spaces:
-            x = [
-                init.low[i_],
-                init.high[i_],
-                init.high[i_],
-                init.low[i_],
-                init.low[i_],
-            ]
-            y = [
-                init.low[j_],
-                init.low[j_],
-                init.high[j_],
-                init.high[j_],
-                init.low[j_],
-            ]
-            ax.plot(x, y, color="cyan", alpha=0.5, zorder=7)
-        for unsafe in self.env.unsafe_spaces:
-            x = [
-                unsafe.low[i_],
-                unsafe.high[i_],
-                unsafe.high[i_],
-                unsafe.low[i_],
-                unsafe.low[i_],
-            ]
-            y = [
-                unsafe.low[j_],
-                unsafe.low[j_],
-                unsafe.high[j_],
-                unsafe.high[j_],
-                unsafe.low[j_],
-            ]
-            ax.plot(x, y, color="magenta", alpha=0.5, zorder=7)
-        for target_space in self.env.target_spaces:
-            x = [
-                target_space.low[i_],
-                target_space.high[i_],
-                target_space.high[i_],
-                target_space.low[i_],
-                target_space.low[i_],
-            ]
-            y = [
-                target_space.low[j_],
-                target_space.low[j_],
-                target_space.high[j_],
-                target_space.high[j_],
-                target_space.low[j_],
-            ]
-            ax.plot(x, y, color="green", alpha=0.5, zorder=7)
-        ax.set_xlim(
-            [self.env.observation_space.low[i_], self.env.observation_space.high[i_]]
-        )
-        ax.set_ylim(
-            [self.env.observation_space.low[j_], self.env.observation_space.high[j_]]
-        )
-        fig.tight_layout()
-        fig.savefig(filename)
-        plt.close(fig)
-
-    def plot_stability_time_contour(self, p, eps, ub_target, big_d, lb_domain, filename):
-        """
-        Plot contours showing the expected time to stability for different regions.
-        
-        This function creates a visualization for stability specifications, showing
-        expected time to reach and remain in the target set.
-        
-        Args:
-            p: The probability of leaving the target set
-            eps: The maximum decrease value
-            ub_target: Upper bound on certificate values in the target set
-            big_d: The "big Delta" parameter for stability analysis
-            lb_domain: Lower bound on certificate values in the domain
-            filename: Path to save the plot
-        """
-        if self.env.observation_dim > 2:
-            return
-        m_d = self.verifier.get_m_d(big_d)
-        n = 100
-
-        states, _, _ = self.verifier.get_unfiltered_grid(n=n)
-        l = self.learner.v_state.apply_fn(self.learner.v_state.params, states).flatten()
-        stab_exp = np.array(((l - lb_domain) / ub_target + (p / (1 - p)) * m_d) / eps)
-
-        plt.figure(figsize=(6, 6))
-
-        contours = plt.contour(np.reshape(states[:, 0], (n, n)), np.reshape(states[:, 1], (n, n)), np.reshape(stab_exp, (n, n)))
-        plt.clabel(contours, inline=1, fontsize=12)
-
-        plt.xlabel('x1')
-        plt.ylabel('x2')
-
-        plt.savefig(filename)
-        pl.close()
