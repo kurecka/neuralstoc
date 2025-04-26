@@ -24,6 +24,8 @@ import numpy as np
 
 from neuralstoc.rl.sac import SAC
 from neuralstoc.rl.ppo import vPPO
+from brax.training.acme import running_statistics
+from brax.training.acme import specs
 
 
 class RSMLearner:
@@ -963,7 +965,29 @@ class RSMLearner:
             self.c_state = params["value"]
         except Exception as e:
             if force_load_all:
-                raise e
+                try:
+                    tmp_state = create_train_state(
+                        self.p_net,
+                        jax.random.PRNGKey(2),
+                        self.env.observation_dim,
+                        self.p_lr,
+                        use_brax=self.use_brax,
+                        out_dim=self.env.action_space.shape[0],
+                        obs_normalization=self.obs_normalization,
+                        opt='adam'
+                    )
+                    params = {
+                        "policy": tmp_state,
+                        "value": self.c_state,
+                        "martingale": self.v_state
+                    }
+                    lrs = {'policy': self.p_lr, 'value': self.c_lr, 'martingale': self.v_lr}
+                    params = jax_load(params, filename, replace_with_adamw=self.opt == 'adamw', lrs=lrs)
+                    self.p_state = params["policy"]
+                    self.c_state = params["value"]
+                    self.v_state = params["martingale"]
+                except Exception:
+                    raise e
             # Legacy load
             try:
                 params = {"policy": self.p_state, "value": self.c_state}
@@ -993,16 +1017,16 @@ class RSMLearner:
 
         self.p_init_params = deepcopy(self.p_state.params['params'])
         if self.policy_type == "sac":
-            self.obs_normalization = self.sac.dummy_obs_norm()
-            # self.obs_normalization = {'mean': 0, 'std': 0, 'count': 0, 'summed_variance': 0}
+            self.obs_normalization: running_statistics.RunningStatisticsState = running_statistics.init_state(
+                specs.Array((self.env.observation_dim,), jnp.dtype('float32')))
             try:
                 if filename.endswith(".jax"):
                     self.obs_normalization = jax_load(self.obs_normalization, filename.replace(".jax", "_obs_normalization.jax"))
                 else:
                     self.obs_normalization = jax_load(self.obs_normalization, filename + "_obs_normalization.jax")
-                # self.obs_normalization = SimpleNamespace(**self.obs_normalization)
             except Exception as e:
                 print(e)
+            self.load_from_brax((self.obs_normalization, self.p_state.params))
 
     def load_from_brax(self, params):
         """

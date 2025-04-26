@@ -107,6 +107,7 @@ class RSMLoop:
         self.iter = 0
         self.info = {}
         self.exp_name = exp_name
+        self.max_prob = -1
 
     def learn(self):
 
@@ -290,6 +291,8 @@ class RSMLoop:
             n = get_n_for_bound_computation(self.env.observation_dim)
 
             if self.verifier.spec == "reachability":
+                self.max_prob = np.maximum(self.max_prob, self.verifier.prob)
+                self.log(max_actual_prob=self.max_prob)
                 return self.verifier.prob
             elif self.verifier.spec == "reach_avoid":
                 _, ub_init = self.verifier.compute_bound_init(n)
@@ -327,7 +330,8 @@ class RSMLoop:
                         actual_prob = 1 - 1 / np.clip(lb_unsafe, 1e-9, None)
                 self.log(old_prob=actual_prob)
                 self.log(actual_prob=actual_prob)
-
+                self.max_prob = np.maximum(self.max_prob, actual_prob)
+                self.log(max_actual_prob=self.max_prob)
                 num = -2 * (-self.info["max_decrease"]) * (lb_unsafe - 1)
                 denom = np.square(self.info["K_l"]) * np.square(self.env.delta)
                 other_prob = 1 - np.exp(num / np.clip(denom, 1e-9, None))
@@ -400,6 +404,8 @@ class RSMLoop:
                         actual_prob = 1 - 1 / np.clip(lb_unsafe, 1e-9, None)
                 self.log(old_prob=actual_prob)
                 self.log(actual_prob=actual_prob)
+                self.max_prob = np.maximum(self.max_prob, actual_prob)
+                self.log(max_actual_prob=self.max_prob)
 
                 num = -2 * (-self.info["max_decrease"]) * (lb_unsafe - 1)
                 denom = np.square(self.info["K_l"]) * np.square(self.env.delta)
@@ -473,7 +479,9 @@ class RSMLoop:
                     return None
                 p = (1 + lip_l * big_d) / lb_unsafe
                 self.log(p=p)
-                return 1
+                self.max_prob = 1
+                self.log(max_actual_prob=self.max_prob)
+                return p
         return None
 
     def log(self, **kwargs):

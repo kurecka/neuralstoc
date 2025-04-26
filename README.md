@@ -333,7 +333,7 @@ To validate the output and compare with the results in the paper:
 2. **Examining results**:
    - Check the output file for the probability bound. The program also gathers the obtained bounds in a separate file named `log_new_bound` (except for `stability`).
    - For stability specifications, look for the line "Stability bound is X%" in the output.
-   - Compare these results with Tables 1 and 2 in the paper.
+   - In addition, a concise summary of each run is automatically appended to `study_results/info_<exp_name>.log`.  This file is populated from the `info` attribute of the learner-verifier loop (see `src/neuralstoc/rsm/loop.py`) and contains useful statistics collected during training and verification. In particular, the field `max_actual_prob` records the maximum probability bound proven so far (a value of `-1` means that no bound has been obtained).
    - Examine the generated plots in the experiment directory to visualize the certificate function and sampled trajectories.
 
 
@@ -496,6 +496,8 @@ NeuralStoc generates the following outputs:
 2. **Artifacts Directory**: For each experiment (specified by `--exp_name`), the tool creates a directory containing:
    - Model checkpoints (`.jax` files) for the neural certificate and controller
    - Plots showing the value function across the state space with unsafe/target sets highlighted
+
+3. **Run Summary Log**: For every run, a line is appended to `study_results/info_<exp_name>.log`. This summary is produced directly from the `info` dictionary of the learner-verifier loop and stores various statistics collected during the run. Among them, the key `max_actual_prob` indicates the highest probability bound that has been formally proven so far (it is `-1` if no bound has been established).
 
 
 ## Note on Optimizations

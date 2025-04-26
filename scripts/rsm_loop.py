@@ -286,7 +286,7 @@ if __name__ == "__main__":
     )
     txt_return, res_dict = learner.evaluate_rl()
 
-    loop.plot_l(f"{loop.exp_name}/plots/{args.env}_start_{args.exp_name}.png")
+    # loop.plot_l(f"{loop.exp_name}/plots/{args.env}_start_{args.exp_name}.png")
     with open("initialize_results.txt", "a") as f:
         f.write(f"{args.env}: {txt_return}\n")
 
@@ -298,9 +298,9 @@ if __name__ == "__main__":
     if args.smoke_test:
         import sys
         if res_dict['num_end_in_target'] <= 0:
-            sys.exit(0)
-        else:
             sys.exit(1)
+        else:
+            sys.exit(0)
 
 
     sat = loop.run(args.timeout * 60)
@@ -313,7 +313,7 @@ if __name__ == "__main__":
     else:
         env_name = args.env
     cmd_line = " ".join(sys.argv)
-    with open(f"study_results/info_{env_name}.log", "a") as f:
+    with open(f"study_results/info_{args.exp_name}.log", "a") as f:
         f.write(f"python3 {cmd_line}\n")
         f.write("    args=" + str(vars(args)) + "\n")
         f.write("    return =" + txt_return + "\n")
