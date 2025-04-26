@@ -3,6 +3,7 @@
 # Experiment Settings
 timeout: 1440  # Timeout in minutes (default: 24 hours)
 plot: true  # Whether to plot results
+logger_level: "INFO"  # Logger level: "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
 
 # Training Parameters
 p_lr: 0.00005  # Learning rate for policy network
