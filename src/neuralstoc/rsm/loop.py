@@ -252,12 +252,12 @@ class RSMLoop:
                 print(f"Increasing grid resolution -> {self.verifier.grid_size}")
             elif self.env.observation_space.shape[0] == 3:
                 if self.no_train:
-                    self.verifier.grid_size *= 1.05
+                    self.verifier.grid_size *= 1.1
                     self.verifier.grid_size = int(self.verifier.grid_size)
                     print(f"Increasing grid resolution -> {self.verifier.grid_size}")
             else:
                 if self.no_train:
-                    self.verifier.grid_size *= 1.01
+                    self.verifier.grid_size *= 1.1
                     self.verifier.grid_size = int(self.verifier.grid_size)
                     print(f"Increasing grid resolution -> {self.verifier.grid_size}")
 

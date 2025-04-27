@@ -296,7 +296,10 @@ if __name__ == "__main__":
 
     if args.smoke_test:
         import sys
-        sys.exit(0)
+        if res_dict['num_end_in_target'] <= 0:
+            sys.exit(1)
+        else:
+            sys.exit(0)
 
 
     sat = loop.run(args.timeout * 60)

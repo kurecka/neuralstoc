@@ -1026,7 +1026,6 @@ class RSMLearner:
                     self.obs_normalization = jax_load(self.obs_normalization, filename + "_obs_normalization.jax")
             except Exception as e:
                 print(e)
-            self.load_from_brax((self.obs_normalization, self.p_state.params))
 
     def load_from_brax(self, params):
         """
