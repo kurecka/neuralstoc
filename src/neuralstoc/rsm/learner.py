@@ -324,8 +324,8 @@ class RSMLearner:
 
         num_end_in_target = jnp.sum(contains.astype(jnp.int64))
         num_traj = contains.shape[0]
-
-        text = f"Rollouts (n={n}): {np.mean(total_reward):0.1f} +- {np.std(total_reward):0.1f} [{np.min(total_reward):0.1f}, {np.max(total_reward):0.1f}] ({100 * num_end_in_target / num_traj:0.2f}% end in target)"
+        text = f"Rollouts (n={n}): {np.mean(total_reward):0.1f} +- {np.std(total_reward):0.1f} [{np.min(total_reward):0.1f}, {np.max(total_reward):0.1f}] ({100 * num_end_in_target / num_traj:0.2f}% end in target)\n"
+        text += "WARNING: The empirical evaluation of policies may be inaccurate due to random initialization and the stochastic nature of the environment. Use the verification results instead for more accurate results."
         print(text)
         res_dict = {
             "mean_r": np.mean(total_reward),
