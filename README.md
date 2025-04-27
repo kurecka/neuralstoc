@@ -331,7 +331,7 @@ To validate the output and compare with the results in the paper:
    ```
 
 2. **Examining results**:
-   - Check the output file for the probability bound. The program also gathers the obtained bounds in a separate file named `log_new_bound` (except for `stability`).
+   - Check the output file for the probability bound. The program also gathers the obtained bounds in a separate file named `log_new_bound`, except for `stability` and `reachability` (their statistics will be logged in `study_results/info_<exp_name>.log`).
    - For stability specifications, look for the line "Stability bound is X%" in the output.
    - In addition, a concise summary of each run is automatically appended to `study_results/info_<exp_name>.log`.  This file is populated from the `info` attribute of the learner-verifier loop (see `src/neuralstoc/rsm/loop.py`) and contains useful statistics collected during training and verification. In particular, the field `max_actual_prob` records the maximum probability bound proven so far (a value of `-1` means that no bound has been obtained).
    - Examine the generated plots in the experiment directory to visualize the certificate function and sampled trajectories.
@@ -491,7 +491,7 @@ You can also use multiplication, e.g., `2*8*1k` is interpreted as 16,384.
 
 NeuralStoc generates the following outputs:
 
-1. **Terminal Output**: Provides information on the verification/learning process, including the final proven probability bound. The program also gathers the obtained bounds in a separate file named `log_new_bound` (except for `stability`).
+1. **Terminal Output**: Provides information on the verification/learning process, including the final proven probability bound. The program also gathers the obtained bounds in a separate file named `log_new_bound`, except for `stability` and `reachability` (their statistics will be logged in `study_results/info_<exp_name>.log`, see number 3).
 
 2. **Artifacts Directory**: For each experiment (specified by `--exp_name`), the tool creates a directory containing:
    - Model checkpoints (`.jax` files) for the neural certificate and controller

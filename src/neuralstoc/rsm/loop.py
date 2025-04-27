@@ -369,6 +369,8 @@ class RSMLoop:
                         self.soft_constraint or actual_prob >= self.verifier.prob
                 ) and self.iter >= self.min_iters:
                     return best_reach_bound
+                if self.no_train:
+                    return best_reach_bound
                 return None
             elif self.verifier.spec == "safety":
                 _, ub_init = self.verifier.compute_bound_init(n)
@@ -443,6 +445,8 @@ class RSMLoop:
                 if (
                         self.soft_constraint or actual_prob >= self.verifier.prob
                 ) and self.iter >= self.min_iters:
+                    return best_reach_bound
+                if self.no_train:
                     return best_reach_bound
                 return None
             elif self.verifier.spec == "stability":
@@ -522,23 +526,28 @@ class RSMLoop:
             print(
                 f"\n#### Iteration {self.iter} (runtime: {pretty_time(runtime)}) #####"
             )
-            if not self.no_train and (not self.skip_first or (self.skip_first and self.iter > 0)):
-                p_state_copy = copy.deepcopy(self.learner.p_state)
-                self.learn()
+            try:
+                if not self.no_train and (not self.skip_first or (self.skip_first and self.iter > 0)):
+                    p_state_copy = copy.deepcopy(self.learner.p_state)
+                    self.learn()
+                    if self.plot:
+                        self.plot_l(f"{self.exp_name}/loop/{self.env.name}_{self.iter:04d}_{self.exp_name}_pre.png", is_pre=True)
+                    _, res = self.learner.evaluate_rl()
+                    if res['num_end_in_target'] / res['num_traj'] < self.rollback_threshold and self.policy_rollback:
+                        self.learner.p_state = p_state_copy
+
+                actual_prob = self.verify()
+
+                self.log(runtime=time.time() - start_time)
+                print("Log=", str(self.info))
+                sys.stdout.flush()
+
                 if self.plot:
-                    self.plot_l(f"{self.exp_name}/loop/{self.env.name}_{self.iter:04d}_{self.exp_name}_pre.png", is_pre=True)
-                _, res = self.learner.evaluate_rl()
-                if res['num_end_in_target'] / res['num_traj'] < self.rollback_threshold and self.policy_rollback:
-                    self.learner.p_state = p_state_copy
-
-            actual_prob = self.verify()
-
-            self.log(runtime=time.time() - start_time)
-            print("Log=", str(self.info))
-            sys.stdout.flush()
-
-            if self.plot:
-                self.plot_l(f"{self.exp_name}/loop/{self.env.name}_{self.iter:04d}_{self.exp_name}.png")
+                    self.plot_l(f"{self.exp_name}/loop/{self.env.name}_{self.iter:04d}_{self.exp_name}.png")
+            except Exception as e:
+                print(f"Error in loop: {e}")
+                print("If you are facing memory issues, try adjusting the batch sizes, grid size, local Lipschitz computation factor, and/or putting a smaller timeout to prevent extensive grid refinement.")
+                return False
 
             if actual_prob is not None:
                 if self.verifier.spec == "reach_avoid":
