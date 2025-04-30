@@ -146,10 +146,12 @@ if __name__ == "__main__":
     parser.add_argument("--policy_path", default=None)
     parser.add_argument("--rollback_threshold", default=0.99, type=float)
     parser.add_argument("--smoke_test", action="store_true")
-
+    parser.add_argument("--bound_co_factor", default=1, type=float)
     args = parser.parse_args()
-    
+    print('args:', str(vars(args)))
+
     if not args.no_config:
+        print('loading config')
         if args.config_path is None:
             print("Error: --config_path must be specified when using --load_config")
             sys.exit(1)
@@ -244,6 +246,7 @@ if __name__ == "__main__":
     else:
         policy_path = args.policy_path if args.policy_path is not None else f"checkpoints/{args.env}_{args.initialize}.jax"
     if args.skip_initialize and args.continue_rsm <= 0:
+        print('loading policy')
         if args.load_from_brax:
             params = brax_model.load_params(policy_path)
             learner.load_from_brax(params)
@@ -251,6 +254,7 @@ if __name__ == "__main__":
             learner.load(policy_path, force_load_all=False)
 
     if not args.skip_initialize:
+        print('pretraining policy')
         learner.pretrain_policy(args.initialize, filename=policy_path)
 
     verifier = RSMVerifier(
@@ -264,9 +268,11 @@ if __name__ == "__main__":
         n_local=args.n_local,
         buffer_size=args.buffer_size,
         spec=args.spec,
+        bound_co_factor=args.bound_co_factor,
     )
 
     if args.continue_rsm > 0:
+        print('loading rsm')
         learner.load(args.rsm_path)
         verifier.grid_size *= args.continue_rsm
 
@@ -284,8 +290,9 @@ if __name__ == "__main__":
         no_train=args.no_train,
         skip_first=args.continue_rsm > 0,
     )
+    print('evaluating policy')
     txt_return, res_dict = learner.evaluate_rl()
-
+    print('plotting policy')
     loop.plot_l(f"{loop.exp_name}/plots/{args.env}_start_{args.exp_name}.png")
     with open("initialize_results.txt", "a") as f:
         f.write(f"{args.env}: {txt_return}\n")
@@ -297,11 +304,14 @@ if __name__ == "__main__":
     if args.smoke_test:
         import sys
         if res_dict['num_end_in_target'] <= 0:
+            print('no end in target')
             sys.exit(1)
         else:
+            print('end in target')
             sys.exit(0)
 
 
+    print('running loop')
     sat = loop.run(args.timeout * 60)
     loop.plot_l(f"{loop.exp_name}/plots/{args.env}_end_{args.exp_name}.png")
 

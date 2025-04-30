@@ -49,10 +49,14 @@ The key features of NeuralStoc include:
    - [PPO Settings](#ppo-settings)
    - [Notes on Size Arguments](#notes-on-size-arguments)
 10. [Output and Artifacts](#output-and-artifacts)
-11. [Note on Optimizations](#note-on-optimizations)
-12. [Note on the Obtained Bounds](#note-on-the-obtained-bounds)
-13. [License](#license)
-14. [Citation](#citation)
+    - [1. Streaming terminal logs](#1-streaming-terminal-logs)
+    - [2. Persistent artifacts on disk](#2-persistent-artifacts-on-disk)
+    - [3. Run summary logs](#3-run-summary-logs)
+11. [The bound_co_factor Parameter](#the-bound_co_factor-parameter)
+12. [Note on Optimizations](#note-on-optimizations)
+13. [Note on the Obtained Bounds](#note-on-the-obtained-bounds)
+14. [License](#license)
+15. [Citation](#citation)
 
 ## System Requirements
 
@@ -69,16 +73,16 @@ The key features of NeuralStoc include:
 
 The Docker installation method is recommended as it ensures all dependencies are correctly configured. Please install the Docker first.
 
-On [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15220507.svg)](https://doi.org/10.5281/zenodo.15220507), we provided a pre-built docker image with the name `neuralstoc-artifact.tar.zip` (built with `Dockerfile`). In our Docker image, we use the same versions of all software that were used in our experiments. To run the image, you can use the following instruction:
+On [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15220507.svg)](https://doi.org/10.5281/zenodo.15220507), we provided a pre-built docker image with the name `neuralstoc.tar.zip` (built with `Dockerfile`). In our Docker image, we use the same versions of all software that were used in our experiments. To run the image, you can use the following instruction:
 
 1. Unzip the downloaded file:
 ```bash
-unzip neuralstoc-artifact.tar.zip
+unzip neuralstoc.tar.zip
 ```
 
 2. Load the Docker image:
 ```bash
-docker load < neuralstoc-artifact.tar
+docker load < neuralstoc.tar
 ```
 
 3. Run the container with GPU support:
@@ -242,7 +246,32 @@ Our experiments were conducted using the following high-performance computing re
 
 It's important to note several factors that affect reproducibility of our results:
 
-1. **High Resource Requirements**: Running these experiments on computers with lower specifications will be challenging and may require parameter adjustments that could affect runtime and numerical results. When using reduced batch sizes, grid sizes, buffer size, or other parameters to accommodate lower-resource machines, expect both longer run times and potentially different final runtime and numerical results compared to those reported in the paper depending on your system specifications.
+1. **High Resource Requirements**: Running these experiments on computers with lower specifications will be challenging and may require parameter adjustments that could affect runtime and numerical results. When using reduced batch sizes (`--batch_size`, `--learner_batch_size`), grid sizes (`--grid_size`), buffer size (`--buffer_size`), or bound computation grid size (via `--bound_co_factor`) to accommodate lower-resource machines, expect both longer run times and potentially different final runtime and numerical results compared to those reported in the paper depending on your system specifications.
+
+Reducing these parameters has two fundamental effects: (i) **learner-side information loss** – fewer samples and counter-examples are processed in each learner–verifier iteration, so the learner sees a less informative view of the state space and may converge more slowly or to a different solution; and (ii) **verifier-side precision loss** – coarser verification and bound-computation grids yield looser over-approximations of the certificate function, which directly influences the tightness of the probability bounds that can be proven.
+
+For runs involving the NeuralStoc tool results (Tables 1 and 2, NeuralStoc columns), these parameters can be adjusted to potentially accommodate lower-resource machines, although be aware that this might affect runtime and numerical results. You can lower these parameters by editing these lines in the `scripts/config.yaml` file: 
+   ```yaml  
+   # Batch, Grid, and Bound Computation Sizes - Timeout (in minutes)
+   batch_size: "32k"  # Batch size for verification
+   learner_batch_size: "32k"  # Batch size for learning
+   grid_size: "32M"  # Grid size for verification
+   buffer_size: 6000000  # Buffer size
+   bound_co_factor: 1  # Co-factor for the bound computation grid size
+   timeout: 1440  # Timeout in minutes (default: 24 hours) 
+   ```
+
+For example, the following configuration **might** be suitable for a GPU with around 12 GB VRAM and 64 GB RAM, potentially requiring a long timeout (e.g., `--timeout 720` for 12 hours):
+   ```yaml
+   # Batch, Grid, and Bound Computation Sizes - Timeout (in minutes)
+   batch_size: "8k"  # Batch size for verification
+   learner_batch_size: "4k"  # Batch size for learning
+   grid_size: "4M"  # Grid size for verification
+   buffer_size: 3000000  # Buffer size
+   bound_co_factor: 0.5  # Co-factor for the bound computation grid size
+   timeout: 720 # Timeout in minutes
+   ```
+For baseline runs (Tables 1 and 2, Baseline columns), since the baseline does not use the configuration file, you should pass or edit the same arguments directly in the command line provided in the corresponding `.sh` script (e.g., add `--batch_size 8k --learner_batch_size 4k --grid_size 4M --buffer_size 3000000 --bound_co_factor 0.5 --timeout 720`).
 
 2. **Non-Deterministic Behavior**: The exact runtime and numerical results may vary between runs and on different systems due to:
    - Stochastic nature of neural network training and optimization
@@ -275,7 +304,7 @@ This approach runs the complete experiment pipeline from initialization to final
 - **Table 2 NeuralStoc**: `scripts/table2_neuralstoc_full.sh`
 - **Table 2 Baseline**: `scripts/table2_baseline_full.sh`
 
-The two fastest experiments for `NeuralStoc` based on our results are for Collision Avoidance (reach-avoid) and Triple Integrator (stability). Consider running their commands (with lower batch sizes and grid size if it doesn't fit in your system) if you want to run a subset of experiments to verify functionality of the tool.
+The two fastest experiments for `NeuralStoc` based on our results are for Collision Avoidance (reach-avoid) and Triple Integrator (stability). Consider running their commands (see "High Resource Requirements" in [Reproducibility Considerations](#reproducibility-considerations) if it doesn't fit in your system) if you want to run a subset of experiments to verify functionality of the tool.
 
 
 ### 2. Partial Experiment Execution
@@ -306,7 +335,7 @@ This set of experiments load the model after the first learning iteration and st
 
 #### 2.2. Verification of Final Results
 
-This approach loads the final checkpoint files from our experiments, allowing you to verify the results without training. This is the fastest option for reproducing the numerical results reported in our paper.
+This option loads the *final* checkpoint files that we provide and **re-runs only the verification phase** – no additional learning is performed.  Consequently, it is the fastest way to validate the numerical results reported in the paper.  If a checkpoint cannot be verified on the first attempt the loop automatically starts another verification iteration, each time enlarging the grid by 10 % per dimension.  We recommend running at least two iterations.  As soon as the desired probability bound (or any bound you consider satisfactory) has been proven you can safely stop the program – see "Examining results" in the "Output Validation" subsection below for how to decide when to interrupt.
 
 **Time Required**: Approximately 2-4 hours per experiment (full set: approximately 30-50 hours)
 
@@ -331,10 +360,11 @@ To validate the output and compare with the results in the paper:
    ```
 
 2. **Examining results**:
-   - Check the output file for the probability bound. The program also gathers the obtained bounds in a separate file named `log_new_bound`, except for `stability` and `reachability` (their statistics will be logged in `study_results/info_<exp_name>.log`).
-   - For stability specifications, look for the line "Stability bound is X%" in the output.
-   - In addition, a concise summary of each run is automatically appended to `study_results/info_<exp_name>.log`.  This file is populated from the `info` attribute of the learner-verifier loop (see `src/neuralstoc/rsm/loop.py`) and contains useful statistics collected during training and verification. In particular, the field `max_actual_prob` records the maximum probability bound proven so far (a value of `-1` means that no bound has been obtained).
-   - Examine the generated plots in the experiment directory to visualize the certificate function and sampled trajectories.
+   - Watch the terminal output for either a success message such as `Stability bound is 100.0%` or the fallback message `Timeout!`.
+   - After every iteration the complete `info` dictionary is printed.  The same dictionary is appended to `study_results/info_<exp_name>.log` at the end of the run.  The field `max_actual_prob` shows the best formally-proven probability bound so far (`-1` means no bound yet).
+   - For *reach-avoid* and *safety* specifications intermediate bounds are continuously written to the file `log_new_bound`; inspect the column `actual_reach_prob` to monitor progress.  If this value already meets your requirement you can interrupt the process right after the tool prints `SAVED` and starts the next iteration since it has already saved your model for that iteration.
+   - All controller/certificate checkpoints and diagnostic plots are stored in the experiment folder created by the tool.
+   - For a detailed description of all logs and files written by the tool see the section [Output and Artifacts](#output-and-artifacts).
 
 
 ## Tool Overview
@@ -391,7 +421,7 @@ neuralstoc/
 | `--env` | `"vlds"` | Environment to use (e.g., 'vlds', 'vpend', 'vhuman2') |
 | `--task` | `"control"` | Task type ('control' or 'verification') |
 | `--spec` | `"reach_avoid"` | Specification type ('reach_avoid', 'safety', 'reachability', or 'stability') |
-| `--timeout` | `24 * 60` | Maximum runtime in minutes |
+| `--timeout` | `1440` | Maximum runtime in minutes |
 | `--plot` | - | Flag to enable plotting during the run |
 | `--env_dim` | `None` | Environment dimension (optional - for LDS 4D) |
 
@@ -418,8 +448,9 @@ neuralstoc/
 | `--eps` | `0.001` | Desired expected decrease value for the certificate |
 | `--norm` | `"linf"` | Norm for Lipschitz calculations ('l1' or 'linf') |
 | `--min_iters` | `0` | Minimum number of iterations to enable refinement of verification grids |
-| `--soft_constraint` | - | If set, only the expected decrease condition will be checked, and the loop will terminate even if the reach-avoid threshold is not achieved |
+| `--soft_constraint` | - | If set, the loop terminates if a bound is verified even lower than the one passed as `prob`, otherwise it continues the learner-verifier loop until it either reaches the timeout or verify a probability threshold higher than `prob`|
 | `--grid_size` | `"16M"` | Target size of the verification grid (supports k/M/G suffixes) |
+| `--bound_co_factor` | `1` | Co-factor to scale the grid size used for bound computation of certification value on the regions (reduces memory usage when < 1 with more loose bounds). See [The bound\_co\_factor Parameter](#the-bound_co_factor-parameter) for details. |
 
 ### Network and Learning Settings
 
@@ -489,16 +520,46 @@ You can also use multiplication, e.g., `2*8*1k` is interpreted as 16,384.
 
 ## Output and Artifacts
 
-NeuralStoc generates the following outputs:
+NeuralStoc produces the following outputs:
 
-1. **Terminal Output**: Provides information on the verification/learning process, including the final proven probability bound. The program also gathers the obtained bounds in a separate file named `log_new_bound`, except for `stability` and `reachability` (their statistics will be logged in `study_results/info_<exp_name>.log`, see number 3).
+### 1. Streaming terminal logs
+* During each learner–verifier iteration the tool prints training losses, Lipschitz bounds, number of violations found, etc.
+* When training for the current iteration finishes, the full `info` dictionary – capturing statistic used by the verifier – is printed.
+* Upon termination the tool prints either a success line, e.g.
+  ```
+  Stability bound is 100.0%
+  ```
+  or, if the wall-clock limit given by `--timeout` has been reached, simply `Timeout!`.
 
-2. **Artifacts Directory**: For each experiment (specified by `--exp_name`), the tool creates a directory containing:
-   - Model checkpoints (`.jax` files) for the neural certificate and controller
-   - Plots showing the value function across the state space with unsafe/target sets highlighted
+### 2. Persistent artifacts on disk
+For every experiment (`--exp_name`) a dedicated directory is created that contains
+* **Model checkpoints** (`*.jax`) for both the neural certificate and the controller are saved after every iteration;
+* **Plots** that visualise the certificate surface together with unsafe/target sets and sampled trajectories (for high-dimensional tasks the plot uses a user-defined projection, see the `plot_l` function in `loop.py`).
 
-3. **Run Summary Log**: For every run, a line is appended to `study_results/info_<exp_name>.log`. This summary is produced directly from the `info` dictionary of the learner-verifier loop and stores various statistics collected during the run. Among them, the key `max_actual_prob` indicates the highest probability bound that has been formally proven so far (it is `-1` if no bound has been established).
+### 3. Run summary logs
+* The `info` dictionary of the last completed iteration is appended to
+  `study_results/info_<exp_name>.log`.  The entry `max_actual_prob` records the highest probability bound proven so far (-1 for none).
+* For specifications where the loop may continue improving a bound (reach-avoid and safety) each newly proven bound is also appended to `log_new_bound` alongside the experiment name.  The column `actual_reach_prob` exposes the the bound that is obtained.
 
+Tip: If the probability in `log_new_bound` already satisfies your needs you may abort the run right after the tool prints `SAVED` and starts the next iteration – the corresponding checkpoints have been written.  Alternatively, you can
+* start the run with `--soft_constraint` to halt automatically after the first proven bound, or
+* reduce `--timeout` to impose a stricter wall-clock limit.
+
+## The bound_co_factor Parameter
+
+The `--bound_co_factor` argument allows scaling the grid density used specifically for computing bounds on the certificate function's values (e.g., `compute_bound_init`, `compute_bound_domain` in the `RSMVerifier`). This is distinct from the main verification grid size controlled by `--grid_size`. It provides an efficient way to trade off memory usage and verification precision related to bound computation without reconfiguring all grid-related parameters:
+
+- **Values < 1**: Reduce the bound computation grid density. This lowers memory consumption during bound calculation steps but might lead to looser bounds and potentially affect the precision of the overall verification numerical result or require more iterations.
+- **Values > 1**: Increase the bound computation grid density. This improves the precision of the computed bounds at the cost of higher memory usage during those steps.
+- **Default value = 1**: Uses the standard bound computation grid sizes.
+
+The parameter works by scaling a base number of points per dimension (`n`) differently depending on the state space dimension (`env_dim`), and then creating a grid of size `n ** env_dim`. The base `n` is determined as follows within the `get_n_for_bound_computation` function:
+- 2D environments: `n = int(200 * bound_co_factor)`
+- 3D environments: `n = int(150 * bound_co_factor)`
+- 4D environments: `n = int(100 * bound_co_factor)`
+- Higher dimensions: `n = int(25 * bound_co_factor)`
+
+Adjusting `--bound_co_factor` can be particularly useful on memory-constrained systems.
 
 ## Note on Optimizations
 

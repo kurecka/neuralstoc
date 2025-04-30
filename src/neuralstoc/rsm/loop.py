@@ -288,7 +288,7 @@ class RSMLoop:
         if dec_sat:
             print("Decrease condition fulfilled!")
 
-            n = get_n_for_bound_computation(self.env.observation_dim)
+            n = get_n_for_bound_computation(self.env.observation_dim, self.verifier.bound_co_factor)
 
             if self.verifier.spec == "reachability":
                 self.max_prob = np.maximum(self.max_prob, self.verifier.prob)
