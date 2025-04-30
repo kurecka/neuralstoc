@@ -2,7 +2,7 @@
 
 This repository contains the supplementary code for the paper "NeuralStoc: A Tool for Neural Stochastic Control and Verification" (CAV 2025), by Matin Ansaripour, Krishnendu Chatterjee, Thomas A. Henzinger, Mathias Lechner, Abhinav Verma, and Đorđe Žikelić.
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15220507.svg)](https://doi.org/10.5281/zenodo.15220507)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15220506.svg)](https://doi.org/10.5281/zenodo.15220506)
 
 ## Introduction
 
@@ -74,7 +74,7 @@ The key features of NeuralStoc include:
 
 The Docker installation method is recommended as it ensures all dependencies are correctly configured. Please install the Docker first.
 
-On [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15220507.svg)](https://doi.org/10.5281/zenodo.15220507), we provided a pre-built docker image with the name `neuralstoc.tar.zip` (built with `Dockerfile`). In our Docker image, we use the same versions of all software that were used in our experiments. To run the image, you can use the following instruction:
+On [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15220506.svg)](https://doi.org/10.5281/zenodo.15220506), we provided a pre-built docker image with the name `neuralstoc.tar.zip` (built with `Dockerfile`). In our Docker image, we use the same versions of all software that were used in our experiments. To run the image, you can use the following instruction:
 
 1. Unzip the downloaded file:
 ```bash
@@ -171,7 +171,7 @@ The image is large (~10 GB) because it bundles:
 This creates a replication of the environment at the cost of size.  To shorten the overall process, download the archive directly on the target server (after logging in via SSH) and unpack it there:
 
 ```bash
-curl -L -o neuralstoc.tar.zip "https://zenodo.org/record/15220507/files/neuralstoc.tar.zip?download=1"
+curl -L -o neuralstoc.tar.zip "https://zenodo.org/record/15313260/files/neuralstoc.tar.zip?download=1"
 unzip neuralstoc.tar.zip
 ```
 
