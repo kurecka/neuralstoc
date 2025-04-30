@@ -210,10 +210,10 @@ ImportError: /opt/venv/lib/python3.10/site-packages/torch/lib/libtorch_cuda.so: 
 
 **Explanation & Fix**
 
-This indicates a mismatch between the installed PyTorch wheels and the version of NCCL / CUDA in the container (rarely triggered when additional packages are installed manually).  Re-install PyTorch 2.1.1, which is compatible with CUDA 12 used in the image:
+This indicates a mismatch between the installed PyTorch wheels and the version of NCCL / CUDA in the container (rarely triggered when additional packages are installed manually).  Re-install PyTorch 2.2.2, which is compatible with CUDA 12 used in the image:
 
 ```bash
-pip install --no-cache-dir torch==2.1.1
+pip install --no-cache-dir torch==2.2.2
 ```
 
 Note: swapping out PyTorch (or any major dependency) can introduce numerical differences from the paper because the tool and environments are inherently stochastic.
