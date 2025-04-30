@@ -405,6 +405,9 @@ Each checkpoint consists of two files:
 
 When using the checkpoint commands, both files are automatically loaded when you specify the main checkpoint file path using the `--rsm_path` argument. Make sure the observation normalization file is near the main file with the extra `_obs_normalization` suffix in the file name.
 
+If, after loading a checkpoint, the policy appears not to load correctly – the initial empirical evaluation printed by the tool shows that no trajectory reaches the target **AND** the verificatoin was not successful – add the flag `--load_scratch` to the command. This forces the program to rebuild the model skeleton from scratch and then copy the parameters from the checkpoint.
+
+Note: The empirical evaluation of policies may be random due to random initialization and the stochastic nature of the environment. Use the verification results instead for more accurate results.
 
 #### 2.1. Continue from First Successful Iteration
 
@@ -572,6 +575,7 @@ neuralstoc/
 | `--policy_rollback` | - | Flag to enable policy rollback if training diverges |
 | `--rollback_threshold` | `0.99` | Threshold for determining policy divergence |
 | `--policy_path` | `None` | Path to load a pre-trained policy. If not provided, a predefined one will be used. |
+| `--load_scratch` | - | Flag to load the model skeleton from scratch and copy the parameters when loading a controller from a checkpoint. Use this if the controller seems not to load correctly when using SAC. |
 | `--init_with_static` | - | Flag to initialize with the old loss function |
 
 ### Batch and Buffer Settings

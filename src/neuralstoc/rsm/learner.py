@@ -90,6 +90,7 @@ class RSMLearner:
             init_with_static=False,
             spec='reach_avoid',
             task='control',
+            load_scratch=False,
     ) -> None:
         """
         Initialize the RSMLearner module.
@@ -132,6 +133,7 @@ class RSMLearner:
             init_with_static: Whether to initialize with the old loss
             spec: Specification type ('reach_avoid', 'safety', 'reachability', or 'stability')
             task: Task type ('control' or 'verification')
+            load_scratch: Whether to load the model skeleton from scratch and copy the params to the new model when loading a controller from a checkpoint, otherwise the model will be loaded directly from the checkpoint
         """
         self.env = env
         self.n_step = n_step
@@ -158,6 +160,7 @@ class RSMLearner:
         self.batch_size = batch_size
         self.K_p = None
         self.K_l = None
+        self.load_scratch = load_scratch
         self.improved_loss = improved_loss
         assert spec in ["reach_avoid", "safety", "reachability", "stability"]
         if spec == "reach_avoid" or spec == "safety":
@@ -1026,6 +1029,8 @@ class RSMLearner:
                     self.obs_normalization = jax_load(self.obs_normalization, filename + "_obs_normalization.jax")
             except Exception as e:
                 print(e)
+            if self.load_scratch:
+                self.load_from_brax((self.obs_normalization, self.p_state.params))
 
     def load_from_brax(self, params):
         """

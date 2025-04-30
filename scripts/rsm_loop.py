@@ -147,6 +147,7 @@ if __name__ == "__main__":
     parser.add_argument("--rollback_threshold", default=0.99, type=float)
     parser.add_argument("--smoke_test", action="store_true")
     parser.add_argument("--bound_co_factor", default=1, type=float)
+    parser.add_argument("--load_scratch", action="store_true")
     args = parser.parse_args()
     print('args:', str(vars(args)))
 
@@ -240,6 +241,7 @@ if __name__ == "__main__":
         spec=args.spec,
         task=args.task,
         policy_type=args.initialize,
+        load_scratch=args.load_scratch,
     )
     if args.load_from_brax or args.initialize == "sac":
         policy_path = args.policy_path if args.policy_path is not None else f"checkpoints/{args.env}_{args.initialize}"
