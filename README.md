@@ -21,14 +21,15 @@ The key features of NeuralStoc include:
 3. [Installation](#installation)
    - [Option 1: Using Docker (Recommended)](#option-1-using-docker-recommended)
    - [Option 2: Direct Installation](#option-2-direct-installation)
-4. [Smoke Test and Logging](#smoke-test-and-logging)
+4. [Common Issues](#common-issues)
+5. [Smoke Test and Logging](#smoke-test-and-logging)
    - [Smoke-test 1: Toy Example](#smoke-test-1-toy-example)
    - [Smoke-test 2: Experiment from the Paper](#smoke-test-2-experiment-from-the-paper)
    - [Smoke-test 3: Checkpoint Loading](#smoke-test-3-checkpoint-loading)
-5. [Usage](#usage)
+6. [Usage](#usage)
    - [Using Configuration Files](#using-configuration-files)
    - [Configuration File Format](#configuration-file-format)
-6. [Replication of the Results in the Paper](#replication-of-the-results-in-the-paper)
+7. [Replication of the Results in the Paper](#replication-of-the-results-in-the-paper)
    - [System Specifications for Our Experiments](#system-specifications-for-our-experiments)
    - [Reproducibility Considerations](#reproducibility-considerations)
    - [1. Full Experiment Execution — Reproduce Results from Scratch](#1-full-experiment-execution--reproduce-results-from-scratch)
@@ -36,9 +37,9 @@ The key features of NeuralStoc include:
      - [2.1. Continue from First Successful Iteration](#21-continue-from-first-successful-iteration)
      - [2.2. Verification of Final Results](#22-verification-of-final-results)
    - [Output Validation](#output-validation)
-7. [Tool Overview](#tool-overview)
-8. [Project Structure](#project-structure)
-9. [Command Line Arguments](#command-line-arguments)
+8. [Tool Overview](#tool-overview)
+9. [Project Structure](#project-structure)
+10. [Command Line Arguments](#command-line-arguments)
    - [Configuration File Settings](#configuration-file-settings)
    - [General Settings](#general-settings)
    - [Available Environments](#available-environments)
@@ -48,15 +49,15 @@ The key features of NeuralStoc include:
    - [Batch and Buffer Settings](#batch-and-buffer-settings)
    - [PPO Settings](#ppo-settings)
    - [Notes on Size Arguments](#notes-on-size-arguments)
-10. [Output and Artifacts](#output-and-artifacts)
+11. [Output and Artifacts](#output-and-artifacts)
     - [1. Streaming terminal logs](#1-streaming-terminal-logs)
     - [2. Persistent artifacts on disk](#2-persistent-artifacts-on-disk)
     - [3. Run summary logs](#3-run-summary-logs)
-11. [The bound_co_factor Parameter](#the-bound_co_factor-parameter)
-12. [Note on Optimizations](#note-on-optimizations)
-13. [Note on the Obtained Bounds](#note-on-the-obtained-bounds)
-14. [License](#license)
-15. [Citation](#citation)
+12. [The bound_co_factor Parameter](#the-bound_co_factor-parameter)
+13. [Note on Optimizations](#note-on-optimizations)
+14. [Note on the Obtained Bounds](#note-on-the-obtained-bounds)
+15. [License](#license)
+16. [Citation](#citation)
 
 ## System Requirements
 
@@ -131,6 +132,91 @@ pip install -e .
 ```
 
 **Note:** The project has specific dependencies including JAX, Flax, Brax, and other machine learning libraries. Make sure you have CUDA 12 installed for GPU acceleration. These dependencies are listed in the `pyproject.toml` file.
+
+## Common Issues
+
+Below we document frequently reported obstacles together with recommended remedies.  If you encounter problems not covered here please open an issue on GitHub so that we can extend this list.
+
+### 1. CUDA "factory already registered" messages when using the Docker image
+
+**Symptoms**
+
+When running any script inside the Docker container, the following messages appear repeatedly and the smoke tests seem to *fail*:
+
+```
+E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:477] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+E0000 00:00:1745341703.916274      48 cuda_dnn.cc:8310] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1745341703.923530      48 cuda_blas.cc:1418] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+```
+
+**Explanation & Fix**
+
+These *are only warnings*, not errors.  They stem from JAX initialising CUDA primitives (via XLA and TensorFlow bindings) more than once.  The program continues normally after printing them.  You can safely ignore the messages.
+
+
+### 2. Very large Docker image (slow download / transfer)
+
+**Symptoms**
+
+Downloading `neuralstoc.tar.zip` takes several hours and moving the uncompressed `*.tar` file to another machine is similarly slow.
+
+**Explanation & Fix**
+
+The image is large (~10 GB) because it bundles:
+
+* CUDA 12 runtime and cuDNN libraries
+* A minimal Linux distribution
+* All Python dependencies (JAX, Flax, Brax, PyTorch, …)
+
+This creates a replication of the environment at the cost of size.  To shorten the overall process, download the archive directly on the target server (after logging in via SSH) and unpack it there:
+
+```bash
+curl -L -o neuralstoc.tar.zip "https://zenodo.org/record/15220507/files/neuralstoc.tar.zip?download=1"
+unzip neuralstoc.tar.zip
+```
+
+### 3. Missing NVIDIA CUDA toolkit on the machine
+
+**Symptoms**
+
+Inside or outside the Docker container the command
+
+```bash
+nvcc --version
+```
+
+does not exist or fails, indicating that the CUDA toolkit is absent.
+
+**Fix**
+
+Install the toolkit (Ubuntu/Debian example):
+
+```bash
+sudo apt update
+sudo apt install nvidia-cuda-toolkit
+```
+
+After installation, restart the terminal so that the `nvcc` binary becomes available in your `PATH`.
+
+### 4. `ImportError: ncclCommRegister` when importing PyTorch
+
+**Symptoms**
+
+Running the smoke test yields:
+
+```
+ImportError: /opt/venv/lib/python3.10/site-packages/torch/lib/libtorch_cuda.so: undefined symbol: ncclCommRegister
+```
+
+**Explanation & Fix**
+
+This indicates a mismatch between the installed PyTorch wheels and the version of NCCL / CUDA in the container (rarely triggered when additional packages are installed manually).  Re-install PyTorch 2.1.1, which is compatible with CUDA 12 used in the image:
+
+```bash
+pip install --no-cache-dir torch==2.1.1
+```
+
+Note: swapping out PyTorch (or any major dependency) can introduce numerical differences from the paper because the tool and environments are inherently stochastic.
 
 ## Smoke Test and Logging
 
