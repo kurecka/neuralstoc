@@ -9,10 +9,9 @@ from neuralstoc.utils import (
     compute_expected_l,
     v_contains,
     v_intersect,
-    lipschitz_l1_jax,
     batch_apply,
 )
-
+from neuralstoc.rsm.lipschitz import lipschitz_l1_jax
 from neuralstoc.rsm.train_buffer import TrainBuffer
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"

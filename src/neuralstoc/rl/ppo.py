@@ -11,13 +11,12 @@ import tensorflow as tf
 import jax.numpy as jnp
 
 from neuralstoc.utils import (
-    lipschitz_l1_jax,
     pretty_time,
     jax_save,
     plot_policy,
-    lipschitz_linf_jax,
     jv_contains,
 )
+from neuralstoc.rsm.lipschitz import lipschitz_l1_jax, lipschitz_linf_jax
 
 SHUFFLE_BUFFER_SIZE = 4096 * 100
 

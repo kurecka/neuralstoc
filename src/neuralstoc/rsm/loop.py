@@ -8,12 +8,14 @@ from gym import spaces
 from tqdm import tqdm
 
 from neuralstoc.utils import (
-    lipschitz_l1_jax,
     triangular,
     pretty_time,
     pretty_number,
-    lipschitz_linf_jax, compute_local_lipschitz, lipschitz_coeff_CPLip
 )
+
+LEGACY = False
+
+from neuralstoc.rsm.lipschitz import lipschitz_l1_jax, get_lipschitz_k
 
 from neuralstoc.rsm.verifier import get_n_for_bound_computation
 import time
@@ -26,6 +28,41 @@ import jax.numpy as jnp
 import logging
 logger = logging.getLogger("neuralstoc")
 
+
+def get_rsm_normalization_coeffs(domain_lb, init_ub, target_ub, spec):
+    low = domain_lb
+    if spec == "safety" or spec == "reach_avoid" or spec == "reachability":
+        high = init_ub
+    else:
+        high = target_ub
+    shift = -low
+    scale = 1 / jnp.maximum(high - low, 1e-6)
+    return shift, scale
+
+
+def get_rsm_normalization(domain_lb, init_ub, target_ub, spec, affine=True):
+    shift, scale = get_rsm_normalization_coeffs(domain_lb, init_ub, target_ub, spec)
+
+    if affine:
+        def func(x):
+            return (x + shift) * scale
+    else:
+        def func(x):
+            return x * scale
+    return func
+
+
+def get_rsm_normalization_inv(domain_lb, init_ub, target_ub, spec, affine=True):
+    shift, scale = get_rsm_normalization_coeffs(domain_lb, init_ub, target_ub, spec)
+
+    if affine:
+        def func(x):
+            return x / scale - shift
+    else:
+        def func(x):
+            return x / scale
+    return func
+    
 
 class RSMLoop:
     """
@@ -55,6 +92,7 @@ class RSMLoop:
             self,
             learner,
             verifier,
+            descent_verifier,
             env,
             monitor,
             plot,
@@ -92,6 +130,7 @@ class RSMLoop:
         self.env = env
         self.learner = learner
         self.verifier = verifier
+        self.descent_verifier = descent_verifier
         self.monitor = monitor
         self.train_p = train_p
         self.min_iters = min_iters
@@ -105,6 +144,7 @@ class RSMLoop:
         self.epochs = epochs
         self.initial_epochs = initial_epochs
 
+        # TODO: Add to monitor
         os.makedirs(exp_name, exist_ok=True)
         os.makedirs(f"{exp_name}/plots", exist_ok=True)
         os.makedirs(f"{exp_name}/saved", exist_ok=True)
@@ -119,7 +159,6 @@ class RSMLoop:
         self.log(iter=self.iter)
 
     def learn(self):
-
         train_ds = self.verifier.train_buffer.as_tfds(batch_size=self.learner.batch_size)
         current_delta = self.prefill_delta
         start_metrics = None
@@ -162,87 +201,7 @@ class RSMLoop:
             f"Trained on {pretty_number(len(self.verifier.train_buffer))} samples, start_loss={start_metrics['loss']:0.3g}, end_loss={metrics['loss']:0.3g}, start_violations={start_metrics['train_violations']:0.3g}, end_violations={metrics['train_violations']:0.3g} in {training_time}"
         )
 
-    def get_lipschitz_k(self):
-        """
-        Compute the Lipschitz term for the verification.
-        
-        This function computes either global or local Lipschitz constants for both
-        the controller and certificate networks, based on the selected norm (L1 or L-infinity).
-        
-        Returns:
-            ndarray: The Lipschitz term(s) to be used in verification
-        """
-        if self.verifier.norm == "l1":
-            K_p = lipschitz_l1_jax(self.learner.p_state.params, obs_normalization=self.learner.obs_normalization).item()
-            K_l = lipschitz_l1_jax(self.learner.v_state.params).item()
-            K_f = self.env.lipschitz_constant
-            lipschitz_k = K_l * K_f * (1 + K_p) + K_l
-
-        else:
-            if self.learner.model == "tmlp":
-                self.learner.update_tmodels()
-
-                grid, steps = self.verifier.get_unfiltered_grid_with_step()
-                eps = 0.5 * np.sqrt(np.sum(steps ** 2))
-                if self.learner.K_p is None:
-                    K_p = compute_local_lipschitz(self.learner.p_tnet, grid, eps, out_dim=self.learner.action_dim, obs_normalization=self.learner.obs_normalization)
-                else:
-                    K_p = self.learner.K_p
-                K_l = compute_local_lipschitz(self.learner.v_tnet, grid, eps)
-
-                self.verifier.cached_lip_l_linf = jnp.float32(K_l)
-                self.verifier.cached_lip_p_linf = jnp.float32(K_p)
-                K_f = self.env.lipschitz_constant_linf
-                lipschitz_k = K_l * K_f * np.maximum(1, K_p) + K_l
-
-                self.log(eps=eps)
-                global_K_l = lipschitz_linf_jax(self.learner.v_state.params).item()
-                self.log(K_l=global_K_l)
-                global_K_p = lipschitz_linf_jax(self.learner.p_state.params, obs_normalization=self.learner.obs_normalization).item()
-                self.log(K_p=global_K_p)
-                self.learner.lip_lambda_l = np.max(K_l) / global_K_l
-                self.learner.lip_lambda_p = np.max(K_p) / global_K_p
-    
-                logger.debug(f'local K_l: {K_l}')
-                logger.debug(f'global K_l: {global_K_l}')
-                for CPLip in [True, False]:
-                    for weighted in [True, False]:
-                        lip = lipschitz_coeff_CPLip(self.learner.v_state.params, True, CPLip=CPLip, weighted=weighted)[0].item()
-                        logger.debug(f'global K_l CPLip={CPLip}, weighted={weighted}: {lip}')
-                logger.debug(f'local K_p: {K_p}')
-                logger.debug(f'global K_p: {global_K_p}')
-                for CPLip in [True, False]:
-                    for weighted in [True, False]:
-                        lip = lipschitz_coeff_CPLip(self.learner.p_state.params, True, CPLip=CPLip, weighted=weighted, obs_normalization=self.learner.obs_normalization)[0].item()
-                        logger.debug(f'global K_p CPLip={CPLip}, weighted={weighted}: {lip}')
-                logger.debug(f'lip_k: {lipschitz_k}')
-            else:
-                K_p = lipschitz_linf_jax(self.learner.p_state.params, obs_normalization=self.learner.obs_normalization).item()
-                K_l = lipschitz_linf_jax(self.learner.v_state.params).item()
-                K_f = self.env.lipschitz_constant_linf
-                lipschitz_k = K_l * K_f * np.maximum(1, K_p) + K_l
-                lipschitz_k = float(lipschitz_k)
-                self.log(lipschitz_k=lipschitz_k)
-                lipschitz_k = np.array([lipschitz_k])
-                self.verifier.cached_lip_l_linf = np.array([jnp.float32(K_l)])
-                self.verifier.cached_lip_p_linf = np.array([jnp.float32(K_p)])
-                self.learner.lip_lambda_l = 1
-                self.learner.lip_lambda_p = 1
-                self.log(K_p=K_p)
-                self.log(K_f=K_f)
-                self.log(K_l=K_l)
-        if self.verifier.norm != "linf":
-
-            self.log(K_p=K_p)
-            self.log(K_f=K_f)
-            self.log(K_l=K_l)
-
-            lipschitz_k = float(lipschitz_k)
-            self.log(lipschitz_k=lipschitz_k)
-
-        return lipschitz_k
-
-    def check_decrease_condition(self, lipschitz_k):
+    def check_decrease_condition(self, value_bounds=None):
         """
         Check if the expected decrease condition of the supermartingale certificate is satisfied.
         
@@ -250,21 +209,44 @@ class RSMLoop:
         the entire state space (excluding the target set).
         
         Args:
-            lipschitz_k: The Lipschitz term(s)
+            local_lipschitz_k: The Lipschitz term(s)
             
         Returns:
             tuple: (satisfied, max_decrease) where
                 - satisfied (bool): True if the decrease condition is satisfied
                 - max_decrease (float): The maximum allowed decrease value
+                - max_decay (float): The maximum decay value
+                - violation_min_val (float): The minimum value of the violation
         """
         logger.info("Checking decrease condition...")
-        (
-            violations,
-            hard_violations,
-            max_decrease,
-            max_decay,
-            violation_min_val
-        ) = self.verifier.check_dec_cond(lipschitz_k)
+        if LEGACY:
+            (
+                violations,
+                hard_violations,
+                max_decrease,
+                max_decay,
+                violation_min_val
+            ) = self.verifier.check_dec_cond(
+                get_lipschitz_k(self.env, self.verifier, self.learner, log=self.monitor.log),
+                ra_bounds=value_bounds
+            )
+
+        else:
+            (
+                violations,
+                hard_violations,
+                max_decrease,
+                max_decay,
+                violation_min_val,
+                counterexamples,
+            ) = self.descent_verifier.check_dec_cond(
+                self.learner.v_state.params,
+                self.learner.p_state.params,
+                value_bounds=value_bounds,
+            )
+        
+            self.verifier.train_buffer.append(counterexamples)
+
         self.log(
             violations=int(violations),
             hard_violations=int(hard_violations),
@@ -272,26 +254,7 @@ class RSMLoop:
             max_decay=max_decay,
             violation_min_val=violation_min_val,
         )
-
-        if violations == 0:
-            return True, max_decrease
-        if (hard_violations == 0 and self.iter > self.min_iters) or self.no_train:
-            if self.env.observation_space.shape[0] == 2:
-                self.verifier.grid_size *= 1.1
-                self.verifier.grid_size = int(self.verifier.grid_size)
-                logger.info(f"Increasing grid resolution -> {self.verifier.grid_size}")
-            elif self.env.observation_space.shape[0] == 3:
-                if self.no_train:
-                    self.verifier.grid_size *= 1.05
-                    self.verifier.grid_size = int(self.verifier.grid_size)
-                    logger.info(f"Increasing grid resolution -> {self.verifier.grid_size}")
-            else:
-                if self.no_train:
-                    self.verifier.grid_size *= 1.01
-                    self.verifier.grid_size = int(self.verifier.grid_size)
-                    logger.info(f"Increasing grid resolution -> {self.verifier.grid_size}")
-
-        return False, max_decrease
+        return violations == 0, max_decrease, max_decay, violation_min_val
 
     def verify(self):
         """
@@ -306,214 +269,112 @@ class RSMLoop:
         Returns:
             float or None: The probability bound if verification succeeds, None otherwise
         """
-        if self.iter < self.min_iters:
-            self.verifier.refinement_enabled = False
+        n = get_n_for_bound_computation(self.env.observation_dim)
+        _, ub_init = self.verifier.compute_bound_init(n)
+        lb_unsafe, _ = self.verifier.compute_bound_unsafe(n)
+        lb_domain, _ = self.verifier.compute_bound_domain(n)
+        _, ub_target = self.verifier.compute_bound_target(n)
+        self.log(
+            ub_init=ub_init,
+            lb_unsafe=lb_unsafe,
+            lb_domain=lb_domain,
+            ub_target=ub_target,
+        )
+
+        normalize = get_rsm_normalization(
+            lb_domain, ub_init, ub_target, self.verifier.spec
+        )
+        denormalize = get_rsm_normalization_inv(
+            lb_domain, ub_init, ub_target, self.verifier.spec
+        )
+
+        if LEGACY:
+            dec_sat, max_decrease, max_decay, violation_min_val = self.check_decrease_condition(
+                value_bounds=(-np.inf, 1 / (1-self.verifier.prob))
+            )
         else:
-            self.verifier.refinement_enabled = True
-        lipschitz_k = self.get_lipschitz_k()
-        dec_sat, max_decrease = self.check_decrease_condition(lipschitz_k)
+            dec_sat, max_decrease, max_decay, violation_min_val = self.check_decrease_condition(
+                value_bounds=(-np.inf, denormalize(1 / (1-self.verifier.prob)))
+            )
 
         self.learner.save(f"{self.exp_name}/saved/{self.env.name}_loop_{self.iter}.jax")
         logger.info("[SAVED]")
         if dec_sat:
             logger.info("Decrease condition fulfilled!")
 
-            n = get_n_for_bound_computation(self.env.observation_dim)
-
-            if self.verifier.spec == "reachability":
-                return self.verifier.prob
-            elif self.verifier.spec == "reach_avoid":
-                _, ub_init = self.verifier.compute_bound_init(n)
-                lb_unsafe, _ = self.verifier.compute_bound_unsafe(n)
-                lb_domain, _ = self.verifier.compute_bound_domain(n)
-                _, ub_target = self.verifier.compute_bound_target(n)
-                self.log(
-                    ub_init=ub_init,
-                    lb_unsafe=lb_unsafe,
-                    lb_domain=lb_domain,
-                    ub_target=ub_target,
+            if lb_unsafe < ub_init:
+                logger.warning(
+                    "WARNING: RSM is lower at unsafe than in init. No Reach-avoid/Safety guarantees can be obtained."
                 )
-                if lb_unsafe < ub_init:
-                    logger.warning(
-                        "WARNING: RSM is lower at unsafe than in init. No Reach-avoid/Safety guarantees can be obtained."
-                    )
-                    if float(self.verifier.prob) < 1.0:
-                        return None
-                # normalize to lb_domain -> 0
-                ub_init = ub_init - lb_domain
-                lb_unsafe = lb_unsafe - lb_domain
-                # normalize to ub_init -> 1
-                lb_unsafe = lb_unsafe / ub_init
-                actual_prob = 1 - 1 / np.clip(lb_unsafe, 1e-9, None)
-                if actual_prob > self.verifier.prob:
-                    (violations,
-                     hard_violations,
-                     max_decrease,
-                     max_decay,
-                     violation_min_val
-                     ) = self.verifier.check_dec_cond(lipschitz_k,
-                                                      ra_bounds=(1 / (1 - self.verifier.prob), lb_unsafe))
-                    self.log(
-                        max_decrease=np.maximum(max_decrease, self.info["max_decrease"]),
-                        max_decay=np.maximum(max_decay, self.info["max_decay"]),
-                    )
-                    if violation_min_val < lb_unsafe:
-                        lb_unsafe = violation_min_val
-                        actual_prob = 1 - 1 / np.clip(lb_unsafe, 1e-9, None)
-
-                num = -2 * (-self.info["max_decrease"]) * (lb_unsafe - 1)
-                denom = np.square(self.info["K_l"]) * np.square(self.env.delta)
-                other_prob = 1 - np.exp(num / np.clip(denom, 1e-9, None))
-
-                best_reach_bound = np.maximum(actual_prob, other_prob)
-
-                N = np.floor((lb_unsafe - 1) / (self.info["K_l"] * self.env.delta))
-                improved_bound = 1 - 1 / np.clip(lb_unsafe, 1e-9, None) * (
-                        self.info["max_decay"] ** N
-                )
-                self.log(
-                    old_prob=actual_prob,
-                    actual_prob=actual_prob,
-                    other_prob=other_prob,
-                    improved_bound=improved_bound,
-                )
-                best_reach_bound = np.maximum(best_reach_bound, improved_bound)
-                self.best_prob = np.maximum(self.best_prob, best_reach_bound)
-
-                with open(f"log_new_bound", "a") as f:
-                    f.write(f"\n#### {self.exp_name} ####\n")
-                    f.write(f"orig_bound     = {actual_prob}\n")
-                    f.write(f"lambda  = {lb_unsafe:0.4g}\n")
-                    f.write(f"epsilon = {-self.info['max_decrease']:0.4g}\n")
-                    f.write(f"LV      = {self.info['K_l']:0.4g}\n")
-                    f.write(f"delta   = {self.env.delta:0.4g}\n")
-                    f.write(f"num     = {num:0.4g}\n")
-                    f.write(f"denom   = {denom:0.4g}\n")
-                    f.write(f"frac    = {num / np.clip(denom, 1e-9, None):0.4g}\n")
-                    f.write(f"exp     = {np.exp(num / np.clip(denom, 1e-9, None)):0.4g}\n")
-                    f.write(f"bound   = {other_prob:0.4g}\n")
-                    f.write(f"------------------------------\n")
-                    f.write(f"max_decay      = {self.info['max_decay']:0.4g}\n")
-                    f.write(f"N              = {N}\n")
-                    f.write(f"improved_bound = {improved_bound}\n")
-                    f.write(f"best_prob = {self.best_prob}\n")
-                    f.write(f"iter = {self.iter}\n")
-
-                if (
-                        self.soft_constraint or best_reach_bound >= self.verifier.prob
-                ) and self.iter >= self.min_iters:
-                    return best_reach_bound
-                return None
-            elif self.verifier.spec == "safety":
-                _, ub_init = self.verifier.compute_bound_init(n)
-                lb_unsafe, _ = self.verifier.compute_bound_unsafe(n)
-                lb_domain, _ = self.verifier.compute_bound_domain(n)
-                self.log(
-                    ub_init=ub_init,
-                    lb_unsafe=lb_unsafe,
-                    lb_domain=lb_domain,
-                )
-                if lb_unsafe < ub_init:
-                    logger.warning(
-                        "WARNING: RSM is lower at unsafe than in init. No Reach-avoid/Safety guarantees can be obtained."
-                    )
-                    if float(self.verifier.prob) < 1.0:
-                        return None
-                # normalize to lb_domain -> 0
-                ub_init = ub_init - lb_domain
-                lb_unsafe = lb_unsafe - lb_domain
-                # normalize to ub_init -> 1
-                lb_unsafe = lb_unsafe / ub_init
-                actual_prob = 1 - 1 / np.clip(lb_unsafe, 1e-9, None)
-                if actual_prob > self.verifier.prob:
-                    (violations,
-                     hard_violations,
-                     max_decrease,
-                     max_decay,
-                     violation_min_val
-                     ) = self.verifier.check_dec_cond(lipschitz_k,
-                                                      ra_bounds=(1 / (1 - self.verifier.prob), lb_unsafe))
-                    self.log(
-                        max_decrease=np.maximum(max_decrease, self.info["max_decrease"]),
-                        max_decay=np.maximum(max_decay, self.info["max_decay"]),
-                    )
-                    if violation_min_val < lb_unsafe:
-                        lb_unsafe = violation_min_val
-                        actual_prob = 1 - 1 / np.clip(lb_unsafe, 1e-9, None)
-
-                num = -2 * (-self.info["max_decrease"]) * (lb_unsafe - 1)
-                denom = np.square(self.info["K_l"]) * np.square(self.env.delta)
-                other_prob = 1 - np.exp(num / np.clip(denom, 1e-9, None))
-                best_reach_bound = np.maximum(actual_prob, other_prob)
-
-                N = np.floor((lb_unsafe - 1) / (self.info["K_l"] * self.env.delta))
-                improved_bound = 1 - 1 / np.clip(lb_unsafe, 1e-9, None) * (
-                        self.info["max_decay"] ** N
-                )
-                self.log(
-                    old_prob=actual_prob,
-                    actual_prob=actual_prob,
-                    other_prob=other_prob,
-                    improved_bound=improved_bound
-                )
-                best_reach_bound = np.maximum(best_reach_bound, improved_bound)
-                self.best_prob = np.maximum(self.best_prob, best_reach_bound)
-
-                with open(f"log_new_bound", "a") as f:
-                    f.write(f"\n#### {self.exp_name} ####\n")
-                    f.write(f"orig_bound     = {actual_prob}\n")
-                    f.write(f"lambda  = {lb_unsafe:0.4g}\n")
-                    f.write(f"epsilon = {-self.info['max_decrease']:0.4g}\n")
-                    f.write(f"LV      = {self.info['K_l']:0.4g}\n")
-                    f.write(f"delta   = {self.env.delta:0.4g}\n")
-                    f.write(f"num     = {num:0.4g}\n")
-                    f.write(f"denom   = {denom:0.4g}\n")
-                    f.write(f"frac    = {num / np.clip(denom, 1e-9, None):0.4g}\n")
-                    f.write(f"exp     = {np.exp(num / np.clip(denom, 1e-9, None)):0.4g}\n")
-                    f.write(f"bound   = {other_prob:0.4g}\n")
-                    f.write(f"------------------------------\n")
-                    f.write(f"max_decay      = {self.info['max_decay']:0.4g}\n")
-                    f.write(f"N              = {N}\n")
-                    f.write(f"improved_bound = {improved_bound}\n")
-                    f.write(f"best_prob = {self.best_prob}\n")
-                    f.write(f"iter = {self.iter}\n")
-
-                if (
-                        self.soft_constraint or actual_prob >= self.verifier.prob
-                ) and self.iter >= self.min_iters:
-                    return best_reach_bound
-                return None
-            elif self.verifier.spec == "stability":
-                lb_unsafe, _ = self.verifier.compute_bound_unsafe(n)
-                lb_domain, _ = self.verifier.compute_bound_domain(n)
-                _, ub_target = self.verifier.compute_bound_target(n)
-                self.log(
-                    lb_unsafe=lb_unsafe,
-                    lb_domain=lb_domain,
-                    ub_target=ub_target,
-                )
-                if self.verifier.norm == "l1":
-                    lip_l = lipschitz_l1_jax(self.learner.v_state.params).item()
-                else:
-                    lip_l = np.max(self.verifier.cached_lip_l_linf)
-                grids, steps = self.verifier.get_unsafe_complement_grid(self.verifier.grid_size)
-                big_d = self.verifier.get_big_delta(grids, steps, ub_target, lb_domain)
-                self.log(big_d=big_d)
-
-                ub_target = ub_target - lb_domain
-                lb_unsafe = lb_unsafe - lb_domain
-                lb_unsafe = lb_unsafe / np.maximum(ub_target, 1e-6)
-                lip_l = lip_l / np.maximum(ub_target, 1e-6)
-                if lb_unsafe <= 1 + lip_l * big_d:
-                    logger.warning(
-                        "Unsafe states are not greater than the bound. The actual lb: "
-                        f"{lb_unsafe}, the desired lower bound: {1 + lip_l * big_d}, "
-                        f"lip_v: {lip_l}, big delta: {big_d}"
-                    )
+                if float(self.verifier.prob) < 1.0:
                     return None
-                p = (1 + lip_l * big_d) / lb_unsafe
-                self.log(p=p)
-                return 1
+
+            actual_prob = 1 - 1 / np.clip(normalize(lb_unsafe), 1e-9, None)
+            if actual_prob > self.verifier.prob:
+                (
+                    _,
+                    max_decrease,
+                    max_decay,
+                    violation_min_val
+                ) = self.check_decrease_condition(value_bounds=(denormalize(1 / (1 - self.verifier.prob)), lb_unsafe))
+
+                self.log(
+                    max_decrease=np.maximum(max_decrease, self.info["max_decrease"]),
+                    max_decay=np.maximum(max_decay, self.info["max_decay"]),
+                )
+                if violation_min_val < lb_unsafe:
+                    lb_unsafe = violation_min_val
+                    actual_prob = 1 - 1 / np.clip(normalize(lb_unsafe), 1e-9, None)
+        
+            normal_lb_unsafe = normalize(lb_unsafe)
+            normal_max_decrease = get_rsm_normalization(
+                lb_domain, ub_init, ub_target, self.verifier.spec, affine=False
+            )(max_decrease)
+
+            num = -2 * (-normal_max_decrease) * (normal_lb_unsafe - 1)
+            denom = np.square(self.info["K_l"]) * np.square(self.env.delta)
+            other_prob = 1 - np.exp(num / np.clip(denom, 1e-9, None))
+
+            best_reach_bound = np.maximum(actual_prob, other_prob)
+
+            N = np.floor((normal_lb_unsafe - 1) / (self.info["K_l"] * self.env.delta))
+            improved_bound = 1 - 1 / np.clip(normal_lb_unsafe, 1e-9, None) * (
+                    self.info["max_decay"] ** N  # TODO: Wrong
+            )
+            self.log(
+                old_prob=actual_prob,
+                actual_prob=actual_prob,
+                other_prob=other_prob,
+                improved_bound=improved_bound,
+            )
+            best_reach_bound = np.maximum(best_reach_bound, improved_bound)
+            self.best_prob = np.maximum(self.best_prob, best_reach_bound)
+
+            with open(f"log_new_bound", "a") as f:
+                f.write(f"\n#### {self.exp_name} ####\n")
+                f.write(f"orig_bound     = {actual_prob}\n")
+                f.write(f"lambda  = {lb_unsafe:0.4g}\n")
+                f.write(f"epsilon = {-self.info['max_decrease']:0.4g}\n")
+                f.write(f"LV      = {self.info['K_l']:0.4g}\n")
+                f.write(f"delta   = {self.env.delta:0.4g}\n")
+                f.write(f"num     = {num:0.4g}\n")
+                f.write(f"denom   = {denom:0.4g}\n")
+                f.write(f"frac    = {num / np.clip(denom, 1e-9, None):0.4g}\n")
+                f.write(f"exp     = {np.exp(num / np.clip(denom, 1e-9, None)):0.4g}\n")
+                f.write(f"bound   = {other_prob:0.4g}\n")
+                f.write(f"------------------------------\n")
+                f.write(f"max_decay      = {self.info['max_decay']:0.4g}\n")
+                f.write(f"N              = {N}\n")
+                f.write(f"improved_bound = {improved_bound}\n")
+                f.write(f"best_prob = {self.best_prob}\n")
+                f.write(f"iter = {self.iter}\n")
+
+            if (
+                    self.soft_constraint or best_reach_bound >= self.verifier.prob
+            ) and self.iter >= self.min_iters:
+                return best_reach_bound
+            return None
+            
         return None
 
     def log(self, **kwargs):
@@ -550,9 +411,7 @@ class RSMLoop:
             if runtime > timeout:
                 logger.warning("Timeout!")
                 return False
-            logger.info(
-                f"\n#### Iteration {self.iter} (runtime: {pretty_time(runtime)}) #####"
-            )
+            logger.info(f"#### Iteration {self.iter} (runtime: {pretty_time(runtime)}) #####")
             if not self.no_train and (not self.skip_first or (self.skip_first and self.iter > 0)):
                 p_state_copy = copy.deepcopy(self.learner.p_state)
                 self.learn()
@@ -576,7 +435,7 @@ class RSMLoop:
 
             if self.plot:
                 logger.info("Plotting")
-                self.plot_l(
+                self.monitor.plot_l(
                     self.env,
                     self.verifier,
                     self.learner,

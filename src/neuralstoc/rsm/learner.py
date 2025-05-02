@@ -10,16 +10,15 @@ from neuralstoc.rsm.ibp import IBPMLP
 from neuralstoc.utils import (
     jax_save,
     jax_load,
-    lipschitz_l1_jax,
     martingale_loss,
     triangular,
     MLP,
     create_train_state,
-    lipschitz_linf_jax,
     get_pmass_grid,
     compute_expected_l,
     jv_contains, TMLP, set_tnet_params,
 )
+from neuralstoc.rsm.lipschitz import lipschitz_l1_jax, lipschitz_linf_jax
 import numpy as np
 
 from neuralstoc.rl.sac import SAC

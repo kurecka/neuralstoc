@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 import yaml
+import numpy as np
 
 from brax.io import model as brax_model
 
@@ -10,6 +11,8 @@ from neuralstoc.environments import get_env
 from neuralstoc.rsm.loop import RSMLoop
 from neuralstoc.rsm.learner import RSMLearner
 from neuralstoc.rsm.verifier import RSMVerifier
+from neuralstoc.rsm.descent_verifier import DescentVerifier
+from neuralstoc.rsm.lipschitz import get_lipschitz_k
 
 
 import logging
@@ -87,6 +90,19 @@ if __name__ == "__main__":
         spec=args.spec,
     )
 
+    descent_verifier = DescentVerifier(
+        env,
+        subspace_size=np.array([3.3, 3.3]),
+        policy_apply=learner.p_state.apply_fn,
+        policy_ibp=learner.p_ibp.apply,
+        value_apply=learner.v_state.apply_fn,
+        value_ibp=learner.v_ibp.apply,
+        get_lipschitz=lambda: get_lipschitz_k(env, verifier, learner, log=monitor.log)[0],
+        target_grid_size=args.grid_size,
+        spec=args.spec,
+        norm=args.norm.lower(),
+    )
+
     if args.continue_rsm > 0:
         logger.info(f"Continue RSM. path = {args.rsm_path}")
         learner.load(args.rsm_path)
@@ -96,6 +112,7 @@ if __name__ == "__main__":
     loop = RSMLoop(
         learner,
         verifier,
+        descent_verifier,
         env,
         monitor,
         plot=args.plot,
