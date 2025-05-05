@@ -270,7 +270,7 @@ class DescentVerifier:
         return soft_violations_num, hard_violations_num, soft_descents.max(), decays.max(), violation_value_lb, violation_states
 
     def refine_grid(self, grid, scales, base_step, soft_descents, hard_descents):
-        coefficients = np.ceil((soft_descents - hard_descents) / -hard_descents * 1.1).astype(np.int32).clip(2, 10)
+        coefficients = np.ceil((soft_descents - hard_descents) / -hard_descents * 1.1).astype(np.int32).clip(2, 4)
         grid_list = []
         scales_list = []
         for coeff in np.unique(coefficients):

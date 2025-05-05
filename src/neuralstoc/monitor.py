@@ -6,12 +6,27 @@ import seaborn as sns
 import os
 import sys
 
+import logging
+logger = logging.getLogger("neuralstoc")
 
 class ExperimentMonitor:
     def __init__(self, experiment_name):
         self.experiment_name = experiment_name
         self.experiment_path = Path('outputs') / experiment_name
         self.experiment_path.mkdir(parents=True, exist_ok=True)
+        (self.experiment_path / "plots").mkdir(parents=True, exist_ok=True)
+        (self.experiment_path / "saved").mkdir(parents=True, exist_ok=True)
+        (self.experiment_path / "loop").mkdir(parents=True, exist_ok=True)
+        (self.experiment_path / "checkpoints").mkdir(parents=True, exist_ok=True)
+
+        file_handler = logging.FileHandler(
+            self.experiment_path / "experiment.log",
+            mode="w",
+            encoding="utf-8",
+        )
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
 
         self.info = {}
 

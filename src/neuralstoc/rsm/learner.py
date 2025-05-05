@@ -929,6 +929,7 @@ class RSMLearner:
         Args:
             filename: Path where the model parameters will be saved
         """
+        filename = str(filename)
         jax_save(
             {"policy": self.p_state, "value": self.c_state, "martingale": self.v_state},
             filename,
@@ -953,6 +954,7 @@ class RSMLearner:
         Returns:
             True if the load was successful, False otherwise
         """
+        filename = str(filename)
         try:
             params = jax_load(
                 {

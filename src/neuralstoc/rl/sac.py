@@ -30,7 +30,7 @@ class SAC:
         """
         self.env_name = env_name
         self.p_hidden = p_hidden
-        num_timesteps = 2_500_000_000
+        num_timesteps = 1_200_000_000  # TODO: make this a cli arg
 
         if env_dim is None:
             self.env = envs.get_environment(env_name=env_name)

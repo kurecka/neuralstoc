@@ -146,10 +146,6 @@ class RSMLoop:
 
         # TODO: Add to monitor
         os.makedirs(exp_name, exist_ok=True)
-        os.makedirs(f"{exp_name}/plots", exist_ok=True)
-        os.makedirs(f"{exp_name}/saved", exist_ok=True)
-        os.makedirs(f"{exp_name}/loop", exist_ok=True)
-        os.makedirs(f"{exp_name}/checkpoints", exist_ok=True)
         self.train_omega = 256
         self.best_prob = 0
         self.plot = plot
@@ -297,7 +293,7 @@ class RSMLoop:
                 value_bounds=(-np.inf, denormalize(1 / (1-self.verifier.prob)))
             )
 
-        self.learner.save(f"{self.exp_name}/saved/{self.env.name}_loop_{self.iter}.jax")
+        self.learner.save(self.monitor.file_path(f"saved/{self.env.name}_loop_{self.iter}.jax"))
         logger.info("[SAVED]")
         if dec_sat:
             logger.info("Decrease condition fulfilled!")

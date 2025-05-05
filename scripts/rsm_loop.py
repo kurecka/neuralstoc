@@ -90,9 +90,17 @@ if __name__ == "__main__":
         spec=args.spec,
     )
 
+    # TODO: Make this systematic
+    if args.env == 'v2lds':
+        subspace_size = np.array([3.3, 3.3])
+    elif args.env == 'v2cavoid':
+        subspace_size = np.array([1.8, 1.8])
+    else:
+        raise ValueError(f"Unknown environment {args.env}")
+
     descent_verifier = DescentVerifier(
         env,
-        subspace_size=np.array([3.3, 3.3]),
+        subspace_size=subspace_size,
         policy_apply=learner.p_state.apply_fn,
         policy_ibp=learner.p_ibp.apply,
         value_apply=learner.v_state.apply_fn,

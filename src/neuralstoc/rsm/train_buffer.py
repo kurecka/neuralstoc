@@ -13,9 +13,12 @@ tf.config.experimental.set_visible_devices([], "GPU")
 
 class JaxDataset:
     def __init__(self, data, batch_size=32, shuffle=False):
-        self.data = data
+        self.rng_key = jax.random.PRNGKey(42)
+        self.data = jax.device_put(data)
         if shuffle:
-            self.data = np.random.permutation(self.data)
+            self.rng_key, subkey = jax.random.split(self.rng_key)
+            idx = jax.random.permutation(subkey, len(self.data))
+            self.data = self.data[idx]
         
         self.data = jax.device_put(self.data)
         padding = batch_size - (len(self.data) % batch_size)
@@ -30,9 +33,9 @@ class JaxDataset:
         return iter(self.data)
 
     def as_numpy_iterator(self):
-        idx = np.random.permutation(len(self.data))
-        for i in idx:
-            yield self.data[i]
+        self.rng_key, subkey = jax.random.split(self.rng_key)
+        idx = jax.random.permutation(subkey, len(self.data))
+        return self.data[idx]
     
     def __len__(self):
         return len(self.data)
