@@ -36,9 +36,8 @@ class ExperimentMonitor:
     
     def write_results(self, args, returned_txt, sat):
         os.makedirs("study_results", exist_ok=True)
-        env_name = "_".join(args.env.split("_")[:2])
         cmd_line = " ".join(sys.argv)
-        with open(f"study_results/info_{env_name}.log", "a") as f:
+        with open(f"study_results/info_{args.exp_name}.log", "a") as f:
             f.write(f"python3 {cmd_line}\n")
             f.write("    args=" + str(vars(args)) + "\n")
             f.write("    return =" + returned_txt + "\n")

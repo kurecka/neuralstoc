@@ -26,15 +26,15 @@ import logging
 logger = logging.getLogger("neuralstoc")
 
 
-def get_n_for_bound_computation(obs_dim):
+def get_n_for_bound_computation(obs_dim, co_factor=1):
     if obs_dim == 2:
-        n = 200
+        n = int(200 * co_factor)
     elif obs_dim == 3:
-        n = 150
+        n = int(150 * co_factor)
     elif obs_dim == 4:
-        n = 100
+        n = int(100 * co_factor)
     else:
-        n = 25
+        n = int(25 * co_factor)
     return n
 
 
@@ -66,6 +66,7 @@ class RSMVerifier:
         norm: The norm used for Lipschitz calculations ('l1' or 'linf')
         spec: The specification type ('reach_avoid', 'reachability', 'safety', or 'stability')
         train_buffer: Buffer containing counterexamples for training
+        bound_co_factor: Co-factor for the bound computation grid size
     """
     
     def __init__(
@@ -79,7 +80,8 @@ class RSMVerifier:
         norm="linf",
         n_local=10,
         buffer_size=6_000_000,
-        spec='reach_avoid'
+        spec='reach_avoid',
+        bound_co_factor=1,
     ):
         """
         Initialize the RSMVerifier module.
@@ -97,6 +99,7 @@ class RSMVerifier:
             n_local: Grid size for local Lipschitz constant computation
             buffer_size: Maximum size of the counterexample buffer
             spec: Specification type ('reach_avoid', 'safety', 'reachability', or 'stability')
+            bound_co_factor: Co-factor for the bound computation grid size
         """
         self.learner = rsm_learner
         self.env = env
@@ -109,7 +112,7 @@ class RSMVerifier:
         self.refinement_enabled = True
         self.cached_lip_l_linf = None
         self.cached_lip_p_linf = None
-
+        self.bound_co_factor = bound_co_factor
         target_grid_size = target_grid_size
         self.grid_size = int(math.pow(target_grid_size, 1 / env.observation_dim))
         self._cached_pmass_grid = self.learner._cached_pmass_grid
@@ -695,7 +698,7 @@ class RSMVerifier:
         grid_total_size = self.grid_size**dims
 
         verify_start_time = time.time()
-        n = get_n_for_bound_computation(self.env.observation_dim)
+        n = get_n_for_bound_computation(self.env.observation_dim, self.bound_co_factor)
         _, ub_init = self.compute_bound_init(n)
         domain_min, _ = self.compute_bound_domain(n)
         _, ub_target = self.compute_bound_target(n)
@@ -1189,7 +1192,7 @@ class RSMVerifier:
         else:
             raise ValueError("Should not happen")
 
-        n = get_n_for_bound_computation(self.env.observation_dim)
+        n = get_n_for_bound_computation(self.env.observation_dim, self.bound_co_factor)
         _, ub_target = self.compute_bound_target(n)
         lb_domain, _ = self.compute_bound_domain(n)
         ub_target = ub_target - lb_domain

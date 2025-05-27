@@ -137,11 +137,14 @@ def configure() -> Tuple[argparse.Namespace, ExperimentMonitor]:
     parser.add_argument("--logger_level", default="ERROR")
     parser.add_argument("--epochs", default=50, type=int)
     parser.add_argument("--initial_epochs", default=50, type=int)
+    parser.add_argument("--bound_co_factor", default=1, type=float)
+    parser.add_argument("--load_scratch", action="store_true")
 
     args = parser.parse_args()
 
     # Parse config file
     if not args.no_config:
+        logger.info("Loading configuration from file: %s", args.config_path)
         if args.config_path is None:
             logger.error("Error: --config_path must be specified when using --load_config")
             sys.exit(1)

@@ -65,18 +65,5 @@ class SAC:
         model.save_params(filename, params)
         return params
     
-    @staticmethod
-    def dummy_progress(num_steps, metrics):
-        pass
-    
-    def dummy_obs_norm(self):
-        print("Computing dummy obs norm")
-        strain_fn = functools.partial(train_sac.train, num_timesteps=8193, num_evals=100, reward_scaling=0.1,
-                                          episode_length=self.env.episode_length, normalize_observations=True, action_repeat=1,
-                                          discounting=0.99, learning_rate=1e-6, num_envs=2048,
-                                          batch_size=1024, seed=1, grad_updates_per_step=1, max_devices_per_host=1,
-                                          max_replay_size=1048576, min_replay_size=8192, weight_decay=self.w_decay)
-        _, params, _ = strain_fn(environment=self.env, progress_fn=self.dummy_progress, p_hidden=self.p_hidden)
-        return params[0]
 
 

@@ -60,6 +60,7 @@ if __name__ == "__main__":
         spec=args.spec,
         task=args.task,
         policy_type=args.initialize,
+        load_scratch=args.load_scratch,
     )
     if args.load_from_brax or args.initialize == "sac":
         policy_path = args.policy_path if args.policy_path is not None else f"checkpoints/{args.env}_{args.initialize}"
@@ -89,6 +90,7 @@ if __name__ == "__main__":
         n_local=args.n_local,
         buffer_size=args.buffer_size,
         spec=args.spec,
+        bound_co_factor=args.bound_co_factor,
     )
 
     # TODO: Make this systematic
@@ -146,15 +148,16 @@ if __name__ == "__main__":
 
     if args.only_initialize:
         import sys
-
         sys.exit(0)
 
     if args.smoke_test:
         import sys
         if res_dict['num_end_in_target'] <= 0:
-            sys.exit(0)
-        else:
+            print('no end in target')
             sys.exit(1)
+        else:
+            print('end in target')
+            sys.exit(0)
 
     logger.info("Running the loop")
     sat = loop.run(args.timeout * 60)
