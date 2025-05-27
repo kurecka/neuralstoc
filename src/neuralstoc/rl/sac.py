@@ -19,7 +19,7 @@ class SAC:
         hidden_dim: Size of hidden layers in the neural networks
     """
     
-    def __init__(self, env_name, env_dim=None, p_hidden=[256, 256]):        
+    def __init__(self, env_name, env_dim=None, p_hidden=[256, 256], num_timesteps=1_200_000_000):
         """
         Initialize the SAC trainer.
         
@@ -30,7 +30,6 @@ class SAC:
         """
         self.env_name = env_name
         self.p_hidden = p_hidden
-        num_timesteps = 1_200_000_000  # TODO: make this a cli arg
 
         if env_dim is None:
             self.env = envs.get_environment(env_name=env_name)

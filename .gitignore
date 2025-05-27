@@ -4,6 +4,7 @@ global_summary.txt
 initialize_results.txt
 study_results
 outputs
+log_new_bound
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

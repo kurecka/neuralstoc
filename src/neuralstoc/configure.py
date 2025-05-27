@@ -3,13 +3,15 @@ import os
 import sys
 import yaml
 
+from typing import Tuple
+
 from neuralstoc.monitor import ExperimentMonitor
 
 import logging
 logger = logging.getLogger("neuralstoc")
 
 
-def interpret_size_arg(cmd):
+def interpret_size_arg(cmd) -> int:
     """
     Converts a string with multiplications into an integer with optional unit multipliers.
     
@@ -47,7 +49,7 @@ def interpret_size_arg(cmd):
     return bs
 
 
-def load_config(config_path):
+def load_config(config_path) -> dict:
     """
     Load configuration from a YAML file.
     
@@ -62,7 +64,7 @@ def load_config(config_path):
     return config
 
 
-def configure():
+def configure() -> Tuple[argparse.Namespace, ExperimentMonitor]:
     """
         Parse command line arguments, load configuration from a YAML file, configure logging, and set up directories.
 
@@ -104,6 +106,7 @@ def configure():
     parser.add_argument("--plot", action="store_true")
     parser.add_argument("--skip_initialize", action="store_true")
     parser.add_argument("--only_initialize", action="store_true")
+    parser.add_argument("--sac_steps", default="1200000000")
     parser.add_argument("--continue_rsm", type=int, default=0)
     parser.add_argument("--rsm_path", type=str, default=None)
     parser.add_argument("--no_train", action="store_true")
@@ -152,6 +155,7 @@ def configure():
     args.batch_size = interpret_size_arg(args.batch_size)
     args.learner_batch_size = interpret_size_arg(args.learner_batch_size)
     args.grid_size = interpret_size_arg(args.grid_size)
+    args.sac_steps = interpret_size_arg(args.sac_steps)
 
     # Configure logger
     try:

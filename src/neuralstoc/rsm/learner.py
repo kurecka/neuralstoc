@@ -80,6 +80,7 @@ class RSMLearner:
             ppo_normalize_r=False,
             ppo_normalize_a=True,
             ppo_save_every=None,
+            sac_steps=1_200_000_000,
             use_brax=True,
             opt="adamw",
             improved_loss=True,
@@ -244,14 +245,15 @@ class RSMLearner:
                 normalize_r=self.ppo_normalize_r,
                 normalize_a=self.ppo_normalize_a,
         )
-        self.sac = SAC(env.name, env_dim, p_hidden)
+        self.sac = SAC(env.name, env_dim, p_hidden, num_timesteps=sac_steps)
         self.p_init_params = None
 
     def pretrain_policy(
             self,
             initialize,
             verbose=True,
-            filename=None
+            filename=None,
+            sac_steps=1000000,
     ):
         """
         Pre-trains the policy network using reinforcement learning.

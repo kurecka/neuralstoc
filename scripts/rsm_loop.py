@@ -51,6 +51,7 @@ if __name__ == "__main__":
         ppo_std_end=args.std_end,
         ppo_normalize_r=args.normalize_r > 0,
         ppo_normalize_a=args.normalize_a > 0,
+        sac_steps=args.sac_steps,
         use_brax=args.load_from_brax,
         improved_loss=args.improved_loss,
         env_dim=args.env_dim if args.env.startswith("vldss") or args.env.startswith("v2ldss") else None,
