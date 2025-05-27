@@ -280,6 +280,7 @@ class RSMLoop:
         Returns:
             float or None: The probability bound if verification succeeds, None otherwise
         """
+        n = get_n_for_bound_computation(self.env.observation_dim, self.verifier.bound_co_factor)
         _, ub_init = self.verifier.compute_bound_init(n)
         lb_domain, _ = self.verifier.compute_bound_domain(n)
         _, ub_target = self.verifier.compute_bound_target(n)
@@ -296,13 +297,12 @@ class RSMLoop:
 
         dec_sat, max_decrease, _, _ = self.check_decrease_condition(value_bounds=(-np.inf, transform.apply_inverse(1 / (1 - self.verifier.prob))))
 
-        self.learner.save(f"{self.exp_name}/saved/{self.env.name}_loop_{self.iter}.jax")
+        self.learner.save(self.monitor.file_path(f"saved/{self.env.name}_loop_{self.iter}.jax"))
         print("[SAVED]")
 
         if dec_sat:
             print("Decrease condition fulfilled!")
 
-            n = get_n_for_bound_computation(self.env.observation_dim, self.verifier.bound_co_factor)
 
             if self.verifier.spec == "reachability":
                 self.max_prob = np.maximum(self.max_prob, self.verifier.prob)
@@ -382,8 +382,8 @@ class RSMLoop:
                 if self.no_train:
                     return best_reach_bound
                 return None
-        else:
-            raise ValueError(f"Specification {self.verifier.spec} is not supported in the new verifier yet.")
+            else:
+                raise ValueError(f"Specification {self.verifier.spec} is not supported in the new verifier yet.")
         return None
 
     def verify_legacy(self):
@@ -406,7 +406,7 @@ class RSMLoop:
         lipschitz_k = get_lipschitz_k(self.verifier, self.learner, log=self.monitor.log)
         dec_sat, max_decrease, _, _ = self.check_decrease_condition(lipschitz_k=lipschitz_k)
 
-        self.learner.save(f"{self.exp_name}/saved/{self.env.name}_loop_{self.iter}.jax")
+        self.learner.save(self.monitor.file_path(f"saved/{self.env.name}_loop_{self.iter}.jax"))
         print("[SAVED]")
         if dec_sat:
             print("Decrease condition fulfilled!")
