@@ -102,7 +102,7 @@ class RSMLoop:
             self,
             learner,
             verifier,
-            descent_verifier,
+            decrease_verifier,
             env,
             monitor,
             plot,
@@ -140,7 +140,7 @@ class RSMLoop:
         self.env = env
         self.learner = learner
         self.verifier = verifier
-        self.descent_verifier = descent_verifier
+        self.decrease_verifier = decrease_verifier
         self.monitor = monitor
         self.train_p = train_p
         self.min_iters = min_iters
@@ -244,7 +244,7 @@ class RSMLoop:
                 max_decay,
                 violation_min_val,
                 counterexamples,
-            ) = self.descent_verifier.check_dec_cond(
+            ) = self.decrease_verifier.check_dec_cond(
                 self.learner.v_state.params,
                 self.learner.p_state.params,
                 value_bounds=value_bounds,

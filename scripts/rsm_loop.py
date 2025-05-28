@@ -11,7 +11,7 @@ from neuralstoc.environments import get_env
 from neuralstoc.rsm.loop import RSMLoop
 from neuralstoc.rsm.learner import RSMLearner
 from neuralstoc.rsm.verifier import RSMVerifier
-from neuralstoc.rsm.descent_verifier import DescentVerifier
+from neuralstoc.rsm.decrease_verifier import DecreaseVerifier
 from neuralstoc.rsm.lipschitz import get_lipschitz_k
 
 
@@ -93,24 +93,17 @@ if __name__ == "__main__":
         bound_co_factor=args.bound_co_factor,
     )
 
-    # TODO: Make this systematic
-    if args.env == 'v2lds':
-        subspace_size = np.array([3.3, 3.3])
-    elif args.env == 'v2cavoid':
-        subspace_size = np.array([1.8, 1.8])
-    else:
-        raise ValueError(f"Unknown environment {args.env}")
-
     def lipschitz_callback():
         K = get_lipschitz_k(env, verifier, learner, log=monitor.log)
         if len(K) > 1:
-            raise ValueError(f"Multiple local Lipschitz constants not yet supported for DescentVerifier")
+            raise ValueError(f"Multiple local Lipschitz constants not yet supported for DecreaseVerifier")
         return K[0]
 
 
-    descent_verifier = DescentVerifier(
+    decrease_verifier = DecreaseVerifier(
         env,
-        subspace_size=subspace_size,
+        chunk_size=args.verifier_chunk_size,
+        fft_threshold=args.fft_threshold,
         policy_apply=learner.p_state.apply_fn,
         policy_ibp=learner.p_ibp.apply,
         value_apply=learner.v_state.apply_fn,
@@ -130,7 +123,7 @@ if __name__ == "__main__":
     loop = RSMLoop(
         learner,
         verifier,
-        descent_verifier,
+        decrease_verifier,
         env,
         monitor,
         plot=args.plot,

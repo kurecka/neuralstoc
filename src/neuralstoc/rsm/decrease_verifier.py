@@ -87,7 +87,7 @@ logger = logging.getLogger("neuralstoc")
 
 def fft(a):
     """
-        Fast Fourier Transform (FFT) for arbitrary number of dimensions.
+    Fast Fourier Transform (FFT) for arbitrary number of dimensions.
     """
     for i in range(a.ndim):
         a = jnp.fft.fft(a, axis=i)
@@ -96,30 +96,18 @@ def fft(a):
 
 def ifft(a):
     """
-        Inverse Fast Fourier Transform (IFFT) for arbitrary number of dimensions.
+    Inverse Fast Fourier Transform (IFFT) for arbitrary number of dimensions.
     """
     for i in range(a.ndim):
         a = jnp.fft.ifft(a, axis=i)
     return a
 
 
-def get_n_for_bound_computation(obs_dim):
-    if obs_dim == 2:
-        n = 200
-    elif obs_dim == 3:
-        n = 150
-    elif obs_dim == 4:
-        n = 100
-    else:
-        n = 25
-    return n
-
-
 @jax.jit
 def cross_corelation(a, kernel):
     """
-        Compute the cross-correlation of a and kernel using FFT (i.e. the convolution of a and reversed kernel).
-        The kernel is assumed to be smaller than a.
+    Compute the cross-correlation of a and kernel using FFT (i.e. the convolution of a and reversed kernel).
+    The kernel is assumed to be smaller than a.
     """
     kernel_shape = kernel.shape
     kernel = jnp.pad(kernel, [(0, a.shape[i] - kernel.shape[i]) for i in range(a.ndim)], mode='constant')
@@ -130,36 +118,67 @@ def cross_corelation(a, kernel):
     return ifft(fta * ftb).real[valid_slice]
 
 
-class DescentVerifier:
-    """
-    Class to verify the descent condition for a given neural network and environment.
+@partial(jax.jit, static_argnums=(0))
+def refine_point(coeff, base_step, center, scale, ):
+    """Refine a single point in the grid by creating `coeff^{env_dim}` new points around the center."""
+    old_step = base_step * scale
+    new_scale = scale / coeff
+    new_step = base_step * new_scale
+    new_centers = DecreaseVerifier.spanning_grid(
+        center - old_step / 2 + new_step / 2,
+        center + old_step / 2 - new_step / 2,
+        size = (coeff,) * len(center),
+    )
+    new_scales = jnp.full(coeff**len(center), new_scale)
+    return new_centers, new_scales
 
-    Interface:
-    - Input: neural network, environment, parameters
-    - Output: locations of hard violations, size of hard violations, number of soft violations
+
+class DecreaseVerifier:
+    """
+    Provides functionality to verify decrease conditions for neural networks on a given environment.
     
     Features:
-    - Perform verification sequentially on subspaces of the environment.
-    - Direct expectation computation
-    - FFT based expectation computation
-    - Invriant set computation
-    - Replace lipschitz with IBP
-    - Replace approximation with real maxima
+    - Chunked verification: Partitions the state space into chunks and cluster those source points
+    that are mapped to the same chunk by the deterministic part of the environment dynamics.
+    - Direct expectation computation: Original approach to compute expectations.
+    - FFT based expectation computation: Uses Fast Fourier Transform to compute expectations.
+    First, the approach evaluates the value function on a grid of points, then computes the cross-correlation
+    with the noise kernel to obtain expectations in the grid points. The expectation centered between the grid points
+    is then computed using multilinear interpolation.
     """
 
     def __init__(
-            self, env, subspace_size,
+            self, env, chunk_size,
             policy_apply, policy_ibp,
             value_apply, value_ibp,
             get_lipschitz,
             target_grid_size,
             spec,
+            fft_threshold=100000,
             silent=False,
             noise_partition_cells=10,
             norm='linf',
         ):
+        """
+        Initialize the DecreaseVerifier.
+
+        Args:
+            env: The environment to verify decrease conditions on.
+            chunk_size: Size of the chunks to partition the state space.
+            policy_apply: JAX function to apply the policy.
+            policy_ibp: JAX function for interval bound propagation of the policy.
+            value_apply: JAX function to apply the value function.
+            value_ibp: JAX function for interval bound propagation of the value function.
+            get_lipschitz: Function to get the Lipschitz constant.
+            target_grid_size: The target size of the source point grid.
+            spec: Specification type (e.g., "reach_avoid", "reachability", "safety", "stability").
+            fft_threshold: Threshold for the number of points in a bucket to use FFT for expectation computation.
+            silent: If True, suppresses progress bars and logs.
+            noise_partition_cells: Number of cells to partition noise into. This also determines the size of the grid over the state space chunk.
+            norm: Norm type ('linf' or 'l1').
+        """
         self.env = env
-        self.subspace_size = subspace_size
+        self.chunk_size = chunk_size
         self.policy_apply = jax.jit(policy_apply)
         self.policy_ibp = jax.jit(policy_ibp)
         self.value_apply = jax.jit(value_apply)
@@ -170,6 +189,7 @@ class DescentVerifier:
         self.spec = spec
         self.noise_partition_cells = noise_partition_cells
         self.grid_size = int(target_grid_size**(1 / env.observation_dim))
+        self.fft_threshold = fft_threshold
 
         assert self.spec in ["reach_avoid", "reachability", "safety", "stability"], f"Unknown spec: {self.spec}"
     
@@ -178,23 +198,34 @@ class DescentVerifier:
         self._cached_filtered_grid = None
     
     def partition_noise(self):
+        """
+        Partition the noise space into cells and prepare the integration grid for expectation computation.
+
+        Sets the following attributes:
+        - noise_lb: Lower coordinates of the partitioned noise cells. Shape: (num_cells, env_dim).
+        - noise_ub: Upper coordinates of the partitioned noise cells. Shape: (num_cells, env_dim).
+        - noise_int_lb: Lower bounds on the probability mass of the noise cells. Shape: (noise_partition_cells,)*env_dim.
+        - noise_int_ub: Upper bounds on the probability mass of the noise cells. Shape: (noise_partition_cells,)*env_dim.
+        - integration_grid: Coordinates of the centers of grid points for integration. Shape: (size_1, size_{env_dim}, env_dim).
+        - integration_grid_step: Step size of the integration grid in each dimension. Shape: (env_dim,).
+        """
         noise_low, noise_high = self.env.noise_bounds
 
         # Partition the noise
         cell_width = (noise_high - noise_low) / self.noise_partition_cells
         num_cells = jnp.array(self.noise_partition_cells * jnp.ones(len(cell_width)), dtype=int)
 
-        self.noise_vertices = self.grid2rectangular(self.spanning_grid(
+        noise_vertices = self.grid2rectangular(self.spanning_grid(
             noise_low + 0.5 * cell_width,
             noise_high - 0.5 * cell_width,
             size=num_cells
         ), num_cells)
 
-        grid_shape = tuple(self.noise_vertices.shape[:-1])
-        env_dim = self.noise_vertices.shape[-1]
+        grid_shape = tuple(noise_vertices.shape[:-1])
+        env_dim = noise_vertices.shape[-1]
 
-        self.noise_lb = self.noise_vertices.reshape((-1, env_dim)) - 0.5 * cell_width
-        self.noise_ub = self.noise_vertices.reshape((-1, env_dim)) + 0.5 * cell_width
+        self.noise_lb = noise_vertices.reshape((-1, env_dim)) - 0.5 * cell_width
+        self.noise_ub = noise_vertices.reshape((-1, env_dim)) + 0.5 * cell_width
 
         self.noise_int_lb = self.noise_int_ub = self.env.integrate_noise(self.noise_lb.T, self.noise_ub.T)
         self.noise_int_lb = self.noise_int_lb.reshape(grid_shape)
@@ -205,7 +236,7 @@ class DescentVerifier:
 
         self.integration_grid, ig_shape = self.spanning_grid_by_step(
             self.integration_grid_step/2 + noise_low,
-            self.subspace_size + (noise_high - noise_low) + self.integration_grid_step/2,
+            self.chunk_size + (noise_high - noise_low) + self.integration_grid_step/2,
             self.integration_grid_step,
             return_size=True,
         )
@@ -219,32 +250,60 @@ class DescentVerifier:
         logger.info(f"Total IG vertices: {np.prod(ig_shape)}")
         logger.info(f"Total IG memory: {np.prod(self.integration_grid.shape) * 2 / 1024**3}GB")
 
-    def check_dec_cond(self, value_params, policy_params, value_bounds=None, couterexamples="all"):  # hard or all
+    def check_dec_cond(self, value_params, policy_params, value_bounds=None, couterexamples="all"):
+        """
+        Check decrease conditions for the given value and policy parameters.
+
+        If `value_bounds` is provided, the function will check only the points that are within the bounds.
+        If `couterexamples` is "hard", it will return only the hard violations.
+        If `couterexamples` is "all", it will return all violations (both hard and soft).
+
+        The source grid is represented by the centers of the grid cells `grid`, the base step size `base_step`,
+        and the relative scales of the grid cells `scales`. I.e. the tuple `(grid, base_step, scales)` represents the grid of points
+        with lower bounds `grid - scales * base_step / 2` and upper bounds `grid + scales * base_step / 2`.
+
+        The function iteratively refines the grid until there is a hard violation or no soft violations are found.
+
+        Args:
+            value_params: Parameters of the value function.
+            policy_params: Parameters of the policy function.
+            value_bounds: Optional tuple of (lower_bound, upper_bound) for the value function.
+            couterexamples: Specifies which counterexamples to return. Can be "hard" or "all".
+
+        Returns:
+            A tuple containing:
+            - Number of soft violations
+            - Number of hard violations
+            - Maximum soft decrease
+            - Maximum decay
+            - Lower bound of the value of a violating state
+            - States that violate the decrease conditions (either hard violations or all violations based on `couterexamples`).
+        """
         grid, base_step = self.get_filtered_grid(self.grid_size)
         scales = np.ones(len(grid), dtype=np.float32)
 
         while True:
             (
-                hard_descents,
-                soft_descents,
+                hard_decreases,
+                soft_decreases,
                 decays,
                 values_lb,
                 values_center,
                 grid, scales
-            ) = self.get_descents(grid, scales, base_step, value_params, policy_params, value_bounds)
+            ) = self.get_decreases(grid, scales, base_step, value_params, policy_params, value_bounds)
 
-            soft_violation_mask = soft_descents >= 0
+            soft_violation_mask = soft_decreases >= 0
             soft_violations_num = np.sum(soft_violation_mask)
-            hard_violations_num = np.sum(hard_descents >= 0)
+            hard_violations_num = np.sum(hard_decreases >= 0)
             logger.info(
-                f"Descent condition check: {soft_violations_num} soft violations, {hard_violations_num} hard violations"
+                f"Decrease condition check: {soft_violations_num} soft violations, {hard_violations_num} hard violations"
             )
 
             if hard_violations_num > 0:
                 logger.info("Found hard violations, skipping refinement.")
                 break
             elif soft_violations_num == 0:
-                logger.info("No descent condition violations found.")
+                logger.info("No decrease condition violations found.")
                 break
 
             logger.info("Refining grid...")
@@ -252,14 +311,14 @@ class DescentVerifier:
                 grid[soft_violation_mask],
                 scales[soft_violation_mask],
                 base_step,
-                soft_descents[soft_violation_mask],
-                hard_descents[soft_violation_mask],
+                soft_decreases[soft_violation_mask],
+                hard_decreases[soft_violation_mask],
             )
         
         if couterexamples == "hard":
-            violation_states = grid[hard_descents >= 0]
+            violation_states = grid[hard_decreases >= 0]
         elif couterexamples == "all":
-            violation_states = grid[soft_descents >= 0]
+            violation_states = grid[soft_decreases >= 0]
         
         if soft_violations_num > 0:
             violation_value_lb = values_lb[soft_violation_mask].min()
@@ -267,17 +326,38 @@ class DescentVerifier:
             violation_value_lb = np.inf if value_bounds is None else value_bounds[1]
 
 
-        return soft_violations_num, hard_violations_num, soft_descents.max(), decays.max(), violation_value_lb, violation_states
+        return soft_violations_num, hard_violations_num, soft_decreases.max(), decays.max(), violation_value_lb, violation_states
 
-    def refine_grid(self, grid, scales, base_step, soft_descents, hard_descents):
-        coefficients = np.ceil((soft_descents - hard_descents) / -hard_descents * 1.1).astype(np.int32).clip(2, 4)
+    def refine_grid(self, grid, scales, base_step, soft_decreases, hard_decreases, max_refinement=4):
+        """
+        Refine the grid based on the soft and hard decreases.
+        The refinement is done by creating new points around the centers of the grid points that have soft decreases and adjusting the scales accordingly.
+
+        The width of the input grid cells is represented by `base_step * scales`.
+        
+        All points in `grid` are assumed to satisfy hard decrease condition, i.e. `hard_decreases < 0` but violate the soft decrease condition, i.e. `soft_decreases >= 0`.
+
+        Args:
+            grid: The centers of the grid cells.
+            scales: The scales of the grid cells.
+            base_step: The reference step size for the grid.
+            soft_decreases: The soft decrease value for each grid point.
+            hard_decreases: The hard decrease for each grid point.
+
+        Returns:
+            A tuple containing:
+            - Refined grid centers
+            - Refined scales for the grid cells.
+        """
+
+        coefficients = np.ceil((soft_decreases - hard_decreases) / -(hard_decreases - 1e7) * 1.1).astype(np.int32).clip(2, max_refinement)
         grid_list = []
         scales_list = []
         for coeff in np.unique(coefficients):
             coeff_mask = coefficients == coeff
             logger.info(f"Grid refinement {coeff}x: {coeff_mask.sum()} points")
             new_centers, new_scales = batch_apply(
-                self.refine_point,
+                refine_point,
                 grid[coeff_mask],
                 scales[coeff_mask],
                 params=(coeff, base_step),
@@ -294,6 +374,9 @@ class DescentVerifier:
 
 
     def value_lb(self, value_params, base_step, x, scale):
+        """
+        Use provided IBP function to compute the lower bound of the value function on a cell.
+        """
         state_lb = x - base_step * scale / 2
         state_ub = x + base_step * scale / 2
         return self.value_ibp(
@@ -301,7 +384,28 @@ class DescentVerifier:
             (state_lb, state_ub),
         )[0].reshape()
 
-    def get_descents(self, grid, scales, base_step, value_params, policy_params, value_bounds):
+    def get_decreases(self, grid, scales, base_step, value_params, policy_params, value_bounds):
+        """
+        Compute hard and soft decreases for the given grid points.
+
+        Args:
+            grid: The centers of the grid cells.
+            scales: The scales of the grid cells.
+            base_step: The reference step size for the grid.
+            value_params: Parameters of the value function.
+            policy_params: Parameters of the policy function.
+            value_bounds: Optional tuple of (lower_bound, upper_bound) for the value function.
+
+        Returns:
+            A tuple containing:
+            - Hard decrease values
+            - Soft decrease values
+            - Decays
+            - Lower bounds of the value function at the grid points
+            - Centered values of the value function at the grid points
+            - Grid points
+            - Scales of the grid cells
+        """
         values_lb = batch_apply(
             self.value_lb,
             grid,
@@ -338,8 +442,10 @@ class DescentVerifier:
 
         return hard_desc, soft_desc, decays, values_center, values_lb, grid, scales
 
-
     def get_next_expectations(self, policy_params, value_params, states, scales, step):
+        """
+        Compute the next step expectations for the given states and scales using either FFT or direct method.
+        """
         gc.collect()
 
         logger.info(f"Computing next step expectations for {len(states)} points...")
@@ -352,12 +458,11 @@ class DescentVerifier:
         )
 
         logger.info(f" - Compute next states")
-        # actions = jnp.vectorize(self.policy_apply, signature='(d)->(a)', excluded=(0,))(policy_params, states)
         next_states = self.env.v_next(states, actions)
         del actions
 
         global_corner = next_states.min(axis=0)
-        bucket_indices = np.floor((next_states-global_corner) / self.subspace_size)
+        bucket_indices = np.floor((next_states-global_corner) / self.chunk_size)
         del next_states
 
         logger.info(f" - Compute order")
@@ -383,19 +488,17 @@ class DescentVerifier:
         logger.info(f"Number of points in each bucket: {counts}")
         logger.info(f"Max bucket index: {buckets.max(axis=0)}")
 
-        THD = 100000
-
-        bar = tqdm.tqdm(total=len(list(filter(lambda c: c>THD, counts))), disable=self.silent)
+        bar = tqdm.tqdm(total=len(list(filter(lambda c: c>self.fft_threshold, counts))), disable=self.silent)
         for bucket, start, count in zip(buckets, starts, counts):
             end = start + count
-            if count <= THD:
+            if count <= self.fft_threshold:
                 skipped[start:end] = True
                 continue
 
             logger.info(f"{bucket}: {start}-{end} ({count})")
             bar.update(1)
 
-            bucket_corner = bucket * self.subspace_size + global_corner
+            bucket_corner = bucket * self.chunk_size + global_corner
         
             hard_exp_batch, soft_exp_batch = self.bucket_compute_expectation_fft(
                 bucket_corner,
@@ -429,7 +532,14 @@ class DescentVerifier:
         return hard_expectations[reversed_ord], soft_expectations[reversed_ord]
 
     def interpolate_multilinear(self, values: jnp.ndarray, point: jnp.ndarray):
-        """Interpolate the value of the grid at the given point using multilinear interpolation."""
+        """
+        Interpolate the value of the grid at the given point using multilinear interpolation.
+
+        Args:
+            values: A grid of values corresponding to a grid of points, where first point is (0, 0, ..., 0)
+            and the spacing between points is defined by `self.integration_grid_step`. Shape is (size_1, size_2, ..., size_{env_dim}).
+            point: The point at which to interpolate the value. Shape is (env_dim,).
+        """
         step = self.integration_grid_step
 
         lb_indices = jnp.floor(point / step).astype(jnp.int32)
@@ -449,7 +559,14 @@ class DescentVerifier:
         return jnp.sum(values[tuple(grid_indices)] * grid_weights)
 
     @partial(jax.jit, static_argnums=(0,))
-    def value_ub(self, value_params, bucket_corner, x):
+    def prepare_expectations(self, ig_values):
+        return cross_corelation(ig_values, self.noise_int_ub)
+    
+    @partial(jax.jit, static_argnums=(0,))
+    def ig_value_ub(self, value_params, bucket_corner, x):
+        """
+        Use provided IBP function to compute the upper bound of the value function on an integration grid cell.
+        """
         state_lb = x + bucket_corner - self.integration_grid_step / 2
         state_ub = x + bucket_corner + self.integration_grid_step / 2
         return self.value_ibp(
@@ -457,14 +574,27 @@ class DescentVerifier:
             (state_lb, state_ub),
         )[1].reshape()
 
-    @partial(jax.jit, static_argnums=(0,))
-    def prepare_expectations(self, ig_values):
-        return cross_corelation(ig_values, self.noise_int_ub)
+    def bucket_compute_expectation_fft(self, bucket_corner, policy_params, value_params, grid, scales, base_step, K):
+        """
+        Compute the next step expectations for the given grid and scales using FFT method.
 
-    def bucket_compute_expectation_fft(self, bucket_corner, policy_params, value_params, states, scales, base_step, K):
+        Args:
+            bucket_corner: The corner of the current bucket in the integration grid.
+            policy_params: Parameters of the policy function.
+            value_params: Parameters of the value function.
+            grid: The centers of the grid cells for which to compute next state expectations.
+            scales: The scales of the grid cells.
+            base_step: The reference step size for the grid.
+            K: Lipschitz constant.
+        
+        Returns:
+            A tuple containing:
+            - Hard expectations
+            - Soft expectations
+        """
         t = time.time()
         ig_values = batch_apply(
-            self.value_ub,
+            self.ig_value_ub,
             self.integration_grid,
             params=(value_params,bucket_corner),
             batch_size=1024*1024,
@@ -482,22 +612,23 @@ class DescentVerifier:
 
         exp_hard, exp_soft = batch_apply(
             self.compute_expectation_fft,
-            states,
+            grid,
             scales,
             params=(policy_params, value_params, ig_expectations, bucket_corner, K, base_step),
             batch_size=1024*1024,
             output_num=2,
         )
-        # exp_hard.block_until_ready()
+
         logger.info(f"Compute expectations time: {time.time() - t}")
         return exp_hard, exp_soft
 
     @partial(jax.jit, static_argnums=(0,))
     def compute_expectation_fft(self, policy_params, value_params, ig_expectations, bucket_corner, K, base_step, state, scale):
+        """Compute the next step expectation for a single state using FFT method."""
         action = self.policy_apply(policy_params, state)
-        state_mean = self.env.next(state, action)
+        next_state_mean = self.env.next(state, action)
 
-        ExpV_xPlus = self.interpolate_multilinear(ig_expectations, state_mean - bucket_corner)
+        ExpV_xPlus = self.interpolate_multilinear(ig_expectations, next_state_mean - bucket_corner)
 
         eps = base_step * scale / 2
         radius = self.eps2radii(eps, self.norm)
@@ -506,12 +637,25 @@ class DescentVerifier:
 
         return ExpV_xPlus, ExpV_xPlus_soft
 
-    def batch_compute_expectation_direct(self, policy_params, value_params, states, scales, base_step, K):
-        # return jax.vmap(self.compute_expectation, in_axes=(None, None, 0, None))(policy_params, value_params, states, K)
+    def batch_compute_expectation_direct(self, policy_params, value_params, grid, scales, base_step, K):
+        """
+        Compute the next step expectations for the given grid and scales using direct method.
+        Args:
+            policy_params: Parameters of the policy function.
+            value_params: Parameters of the value function.
+            grid: The centers of the grid cells for which to compute expectations.
+            scales: The scales of the grid cells.
+            base_step: The reference step size for the grid.
+            K: Lipschitz constant.
+        Returns:
+            A tuple containing:
+            - Hard expectations
+            - Soft expectations
+        """
         return batch_apply(
             self.compute_expectation,
-            states,
-            scales, 
+            grid,
+            scales,
             params=(policy_params, value_params, K, base_step),
             batch_size=1024*2,
             output_num=2,
@@ -519,6 +663,7 @@ class DescentVerifier:
 
     @partial(jax.jit, static_argnums=(0,))
     def compute_expectation(self, policy_params, value_params, K, base_step, state, scale):
+        """Compute the next step expectation for a single state using direct method."""
         action = self.policy_apply(policy_params, state)
         next_state = self.env.next(state, action)
 
@@ -535,78 +680,104 @@ class DescentVerifier:
 
         return ExpV_xPlus, ExpV_xPlus_soft
 
-    def ticks2grid(self, ticks):
+    @staticmethod
+    def ticks2grid(ticks):
         """
             Generate grid points from ticks.
 
-            :param ticks: List of arrays representing the ticks in each dimension.
-            :return: Grid points. Shape is (product(size), len(ticks)).
+            Example:
+                ticks = [jnp.array([0, 1, 2]), jnp.array([0, 1])]
+                grid = self.ticks2grid(ticks)
+                # grid will be [[0, 0], [1, 0], [2, 0], [0, 1], [1, 1], [2, 1]]
+
+            Args:
+                List of arrays representing the ticks in each dimension.
+            Return:
+                Grid points. Shape: (product(size), len(ticks)).
         """
         grid = jnp.vstack(list(map(jnp.ravel, jnp.meshgrid(*ticks)))).T
         return grid
 
-    def spanning_grid(self, low, high, size, return_step=False):
+    @staticmethod
+    def spanning_grid(low, high, size, return_step=False):
         """
             Generate grid points spanning the given range and the grid size in each dimension.
 
-            :param low: Lower bounds of the grid.
-            :param high: Upper bounds of the grid.
-            :param size: Number of points in each dimension.
-            :return: Grid points. Shape is (product(size), space_dim).
+            Example:
+                low = jnp.array([0, 0])
+                high = jnp.array([1, 2])
+                size = (2, 3)
+                grid = self.spanning_grid(low, high, size)
+                # grid will be [[0, 0], [0, 1], [0, 2], [1, 0], [1, 1], [1, 2]] 
+
+            Args:
+                low: Lower bounds of the grid.
+                high: Upper bounds of the grid.
+                size: Number of points in each dimension.
+            
+            Returns:
+                Grid points. Shape: (product(size), space_dim).
         """
         ticks = [jnp.linspace(low[i], high[i], size[i], endpoint=True) for i in range(len(size))]
         if return_step:
             step = np.array([ticks[i][1] - ticks[i][0] for i in range(len(size))])
-            return self.ticks2grid(ticks), step
+            return DecreaseVerifier.ticks2grid(ticks), step
         else:
-            return self.ticks2grid(ticks)
+            return DecreaseVerifier.ticks2grid(ticks)
 
-    def spanning_grid_by_step(self, low, high, step, return_size=False):
+    @staticmethod
+    def spanning_grid_by_step(low, high, step, return_size=False):
         """
             Generate grid points spanning the given range with specified step sizes.
 
-            :param low: Lower bounds of the grid.
-            :param high: Upper bounds of the grid.
-            :param step: Step sizes in each dimension.
-            :return: Grid points. Shape is (product(size), space_dim).
+            Example:
+                low = jnp.array([0, 0])
+                high = jnp.array([1, 2])
+                step = jnp.array([1, 1])
+                grid = self.spanning_grid_by_step(low, high, step)
+                # grid will be [[0, 0], [0, 1], [0, 2], [1, 0], [1, 1], [1, 2]]
+
+            Args:
+                low: Lower bounds of the grid.
+                high: Upper bounds of the grid.
+                step: Step sizes in each dimension.
+            
+            Returns:
+                Grid points. Shape is (product(size), space_dim).
         """
         ticks = [jnp.arange(low[i], high[i] + step[i] / 2, step[i]) for i in range(len(step))]
         if return_size:
             size = tuple(map(len, ticks))
-            return self.ticks2grid(ticks), size
+            return DecreaseVerifier.ticks2grid(ticks), size
         else:
-            return self.ticks2grid(ticks)
+            return DecreaseVerifier.ticks2grid(ticks)
     
-    @partial(jax.jit, static_argnums=(0, 1))
-    def refine_point(self, coeff, base_step, center, scale, ):
-        old_step = base_step * scale
-        new_scale = scale / coeff
-        new_step = base_step * new_scale
-        new_centers = self.spanning_grid(
-            center - old_step / 2 + new_step / 2,
-            center + old_step / 2 - new_step / 2,
-            size = (coeff,) * len(center),
-        )
-        new_scales = jnp.full(coeff**len(center), new_scale)
-        return new_centers, new_scales
 
-    def grid2rectangular(self, grid, size):
+    @staticmethod
+    def grid2rectangular(grid, size):
         """
-            Convert a grid of points to a rectangular grid.
+            Reorder and reshape a grid of centers to that the coordinates correspond to their indices in a multi-dimensional array.
 
-            :param grid: Grid points. Shape is (product(size), space_dim).
-            :return: Rectangular grid points. Shape is (size[0], size[1], ..., space_dim).
+            Example:
+                grid = jnp.array([[0, 0], [0, 1], [1, 0], [1, 1]])
+                size = (2, 2)
+                rectangular_grid = self.grid2rectangular(grid, size)
+                # rectangular_grid will be [[[0, 0], [1, 0]], [[0, 1], [1, 1]]]
+
+            Args:
+                grid: Grid points. Shape is (product(size), space_dim).
+                size: Size of the grid in each dimension.
+            
+            Returns:
+                Rectangular grid points. Shape is (size[0], size[1], ..., size[-1]).
         """
         order = jnp.lexsort(jnp.flip(grid, -1).T)
         return grid[order].reshape(tuple(size) + grid.shape[1:])
-
-    def linf_diam2radii(self, diam, dim, norm):
-        if norm == 'linf':
-            return diam / 2
-        elif norm == 'l1':
-            return diam / 2 * dim
     
-    def eps2radii(self, step, norm):
+    @staticmethod
+    def eps2radii(step, norm):
+        """Convert radius vector of a grid cell into radius in the specified norm."""
+
         if norm == 'linf':
             return step.max()
         elif norm == 'l1':
@@ -687,29 +858,4 @@ class DescentVerifier:
         steps = np.array(steps)
         self._cached_filtered_grid = (n, filtered_grid, steps)
         return filtered_grid, steps
-
-
-if __name__ == "__main__":
-    from neuralstoc.environments import v2LDSEnv
-    verifier = DescentVerifier(
-        env=v2LDSEnv(),
-        subspace_size=0.1,
-        policy_apply=lambda: None,
-        policy_ibp=lambda: None,
-        value_apply=lambda: None,
-        value_ibp=lambda: None,
-        get_lipschitz=lambda: 1.0,
-        target_grid_size=10,
-        spec="reach_avoid",
-    )
-
-    # Test refine_point
-    point = np.array([0.0, 0.0])
-    scale = 0.5
-    base_step = np.array([4.0, 4.0])
-    coeff = 2
-    new_centers, new_scales = verifier.refine_point(coeff, base_step, point, scale)
-    assert len(new_centers) == 4
-    assert len(new_scales) == 4
-    assert np.all((new_scales - 0.25) < 1e-5)
-    print(new_centers)
+    

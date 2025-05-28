@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 import yaml
+import numpy as np
 
 from typing import Tuple
 
@@ -47,6 +48,29 @@ def interpret_size_arg(cmd) -> int:
         else:
             bs *= int(p)
     return bs
+
+
+def interpret_array_arg(cmd) -> np.ndarray:
+    """
+    Converts a string representation of an array into a numpy array.
+
+    Examples of valid input:
+        "[0.1,0.2,0.3]" -> np.array([0.1, 0.2, 0.3])
+        "[[0.1,0.2],[0.3,0.4]]" -> np.array([[0.1, 0.2], [0.3, 0.4]])
+    Args:
+        cmd (str): The string representation of the array
+    Returns:
+        np.ndarray: The parsed numpy array
+    """
+    if not all(c.isdigit() or c in ".,[]" or c.isspace() for c in cmd):
+        raise ValueError(f"Invalid array format: {cmd}. Only numbers, brackets, decimal points, commas, and spaces are allowed.")
+
+    try:
+        return eval("np.array(" + cmd + ")")
+    except SyntaxError as e:
+        raise ValueError(f"Invalid array format: {cmd}. {e}")
+    except ValueError as e:
+        raise ValueError(f"Invalid array format: {cmd}. {e}")
 
 
 def load_config(config_path) -> dict:
@@ -139,6 +163,8 @@ def configure() -> Tuple[argparse.Namespace, ExperimentMonitor]:
     parser.add_argument("--initial_epochs", default=50, type=int)
     parser.add_argument("--bound_co_factor", default=1, type=float)
     parser.add_argument("--load_scratch", action="store_true")
+    parser.add_argument("--fft_threshold", default="100000")
+    parser.add_argument("--verifier_chunk_size", default="")
 
     args = parser.parse_args()
 
@@ -159,6 +185,9 @@ def configure() -> Tuple[argparse.Namespace, ExperimentMonitor]:
     args.learner_batch_size = interpret_size_arg(args.learner_batch_size)
     args.grid_size = interpret_size_arg(args.grid_size)
     args.sac_steps = interpret_size_arg(args.sac_steps)
+    args.fft_threshold = interpret_size_arg(args.fft_threshold)
+
+    args.verifier_chunk_size = interpret_array_arg(args.verifier_chunk_size) if args.verifier_chunk_size else None
 
     # Configure logger
     try:
