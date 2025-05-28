@@ -101,6 +101,13 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"Unknown environment {args.env}")
 
+    def lipschitz_callback():
+        K = get_lipschitz_k(env, verifier, learner, log=monitor.log)
+        if len(K) > 1:
+            raise ValueError(f"Multiple local Lipschitz constants not yet supported for DescentVerifier")
+        return K[0]
+
+
     descent_verifier = DescentVerifier(
         env,
         subspace_size=subspace_size,
@@ -108,7 +115,7 @@ if __name__ == "__main__":
         policy_ibp=learner.p_ibp.apply,
         value_apply=learner.v_state.apply_fn,
         value_ibp=learner.v_ibp.apply,
-        get_lipschitz=lambda: get_lipschitz_k(env, verifier, learner, log=monitor.log)[0],
+        get_lipschitz=lipschitz_callback,
         target_grid_size=args.grid_size,
         spec=args.spec,
         norm=args.norm.lower(),

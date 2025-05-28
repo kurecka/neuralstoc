@@ -208,7 +208,7 @@ class RSMLoop:
             f"Trained on {pretty_number(len(self.verifier.train_buffer))} samples, start_loss={start_metrics['loss']:0.3g}, end_loss={metrics['loss']:0.3g}, start_violations={start_metrics['train_violations']:0.3g}, end_violations={metrics['train_violations']:0.3g} in {training_time}"
         )
 
-    def check_decrease_condition(self, value_bounds=None, lipschitz_k=None):
+    def check_decrease_condition(self, value_bounds=None, local_lipschitz_k=None):
         """
         Check if the expected decrease condition of the supermartingale certificate is satisfied.
         
@@ -227,14 +227,14 @@ class RSMLoop:
         """
         logger.info("Checking decrease condition...")
         if LEGACY:
-            assert lipschitz_k is not None, "Lipschitz constant must be provided for legacy verifier"
+            assert local_lipschitz_k is not None, "Lipschitz constant must be provided for legacy verifier"
             (
                 violations,
                 hard_violations,
                 max_decrease,
                 max_decay,
                 violation_min_val
-            ) = self.verifier.check_dec_cond(lipschitz_k, ra_bounds=value_bounds)
+            ) = self.verifier.check_dec_cond(local_lipschitz_k, ra_bounds=value_bounds)
 
         else:
             (
@@ -331,8 +331,8 @@ class RSMLoop:
                         value_bounds=(transform.apply_inverse(1 / (1 - self.verifier.prob)), normalized_lb_unsafe)
                     )
 
-                    self.log(max_decrease=np.maximum(transform(max_decrease), self.info["max_decrease"]))
-                    self.log(max_decay=np.maximum(max_decay, self.info["max_decay"]))  # TODO: This is just not correct due to the affine normalization. The offset changes the relative descent.
+                    self.log(max_decrease=np.maximum(max_decrease, self.info["max_decrease"]))
+                    self.log(max_decay=np.maximum(max_decay, self.info["max_decay"]))  # TODO: This is just not correct due to the affine normalization. The offset changes the relative decrease.
                     if violation_min_val < lb_unsafe:
                         lb_unsafe = violation_min_val
                         normalized_lb_unsafe = transform(lb_unsafe)

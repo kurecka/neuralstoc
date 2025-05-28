@@ -89,8 +89,6 @@ class TrainBuffer:
             return self._cached_ds
         train_s = np.concatenate(self.s, axis=0)
         train_s = np.random.default_rng().permutation(train_s)
-        # train_ds = tf.data.Dataset.from_tensor_slices(train_s)
-        # train_ds = train_ds.shuffle(50000).batch(batch_size).prefetch(tf.data.AUTOTUNE)
         train_ds = JaxDataset(train_s, batch_size=batch_size, shuffle=True)
         self._cached_ds = train_ds
         return train_ds
@@ -111,16 +109,3 @@ class TrainBuffer:
                 for i in range(0, len(s), batch_size):
                     new_s.append(s[i : i + batch_size])
             return new_s
-
-
-
-if __name__ == "__main__":
-    buffer = TrainBuffer(max_size=10)
-    buffer.append(np.random.randn(3, 2))
-    assert len(buffer) == 3
-    buffer.append(np.random.randn(1, 2))
-    assert len(buffer) == 4
-    buffer.extend([np.random.randn(2, 2), np.random.randn(3, 2)])
-    assert len(buffer) == 9
-    buffer.append(np.arange(10).reshape(5, 2))
-    assert len(buffer) == 10

@@ -1003,7 +1003,6 @@ class RSMVerifier:
         Returns:
             ndarray: Grid points in the safe region of the state space
         """
-        # print(f"Allocating grid of n={n} ", end="", flush=True)
         dims = self.env.observation_space.shape[0]
         grid, steps = [], []
         for i in range(dims):
@@ -1016,7 +1015,6 @@ class RSMVerifier:
             )
             grid.append(samples)
             steps.append(step)
-        # print(f" meshgrid with steps={steps} ", end="", flush=True)
         logger.info(f"Allocating grid of n={n} meshgrid with steps={steps}")
         grid = np.meshgrid(*grid)
         grid = [grid[i].flatten() + steps[i] / 2 for i in range(dims)]
@@ -1076,8 +1074,6 @@ class RSMVerifier:
             )
             grid.append(samples)
             steps.append(step)
-        # print(f"Allocating grid of n={n} ", end="", flush=True)
-        # print(f" meshgrid with steps={steps} ", end="", flush=True)
         logger.info(f"Allocating grid of n={n} meshgrid with steps={steps}")
         grid = np.meshgrid(*grid)
         grid = [grid[i].flatten() + steps[i] / 2 for i in range(dims)]
